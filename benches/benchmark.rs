@@ -1,5 +1,5 @@
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
-use libtemplate::fibonacci;
+use libssg::fibonacci;
 use std::hint::black_box;
 
 fn criterion_benchmark(c: &mut Criterion) {

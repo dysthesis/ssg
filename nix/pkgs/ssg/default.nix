@@ -8,7 +8,7 @@ craneLib.buildPackage (
   commonArgs
   // {
     inherit cargoArtifacts;
-    pname = "template";
+    pname = "ssg";
     CARGO_PROFILE = "release";
   }
 )

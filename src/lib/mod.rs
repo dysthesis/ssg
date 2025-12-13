@@ -7,7 +7,7 @@
 /// # Examples
 ///
 /// ```
-/// assert_eq!(libtemplate::fibonacci(5), 8);
+/// assert_eq!(libssg::fibonacci(5), 8);
 /// ```
 #[inline]
 #[must_use]

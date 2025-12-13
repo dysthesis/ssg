@@ -10,13 +10,10 @@
       charonToolchain,
       lake2nix,
       ...
-    }:
-    let
+    }: let
       inherit (pkgs) callPackage;
-    in
-    {
-      ssg = rec {
-        package = callPackage ./ssg {
+    in { packages = rec {
+        ssg = callPackage ./ssg {
           inherit
             craneLib
             pkgs
@@ -25,7 +22,8 @@
             ;
         };
 
-        default = package;
-      };
-    };
+
+
+        default = ssg;
+    };};
 }
