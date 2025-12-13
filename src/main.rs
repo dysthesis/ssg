@@ -1,36 +1,22 @@
-use clap::Parser;
-use color_eyre::{
-    Section,
-    eyre::{Context, Result},
-};
-
-use crate::cli::Cli;
+use color_eyre::{Section, eyre::Result};
+use std::env::current_dir;
 
 mod cli;
 fn main() -> Result<()> {
     // Install error logging
     color_eyre::install()?;
 
-    // Process CLI arguments
-    let cli = Cli::parse();
-    match cli.commmand {
-        cli::Command::Build { output_dir } => {
-            let input_dir = cli
-                .dir
-                .map_or_else(|| std::env::current_dir()
-                    .wrap_err("Failed to find the current working directory")
-                    .with_note(|| "No input path was provided; attempted to fallback to the current working directory"), Ok)?;
+    let input_dir =
+        current_dir().with_note(|| "While getting current working directory for the input.")?;
 
-            let output_dir = output_dir.unwrap_or_else(|| input_dir.join("result"));
+    let output_dir = input_dir.join("result");
 
-            println!(
-                r#"
-            Output dirctory:    {output_dir:?}
-            Input directory:    {input_dir:?}
-            "#
-            )
-        }
-    }
+    println!(
+        r#"
+    Input directory:    {input_dir:?}
+    Ouptut directory:   {output_dir:?}
+    "#
+    );
 
     Ok(())
 }
