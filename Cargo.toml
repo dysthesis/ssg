@@ -5,7 +5,9 @@ edition = "2024"
 
 [dependencies]
 color-eyre = { version = "0.6.5", default-features = false }
-pulldown-cmark = { version = "0.13.0", default-features = false, features = ["simd"] }
+itertools = { version = "0.14.0", default-features = false }
+pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html", "simd"] }
+tracing = { version = "0.1.43", default-features = false }
 walkdir = { version = "2.5.0", default-features = false }
 
 [dev-dependencies]
