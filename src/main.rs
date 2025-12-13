@@ -1,7 +1,6 @@
 use color_eyre::{Section, eyre::Result};
 use std::env::current_dir;
 
-mod cli;
 fn main() -> Result<()> {
     // Install error logging
     color_eyre::install()?;
