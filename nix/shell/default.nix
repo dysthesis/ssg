@@ -2,8 +2,6 @@
   perSystem = {
     pkgs,
     craneLib,
-    inputs',
-    self',
     ...
   }: let
     valeConfigured = pkgs.callPackage ./vale {};
@@ -22,6 +20,7 @@
         cargo-nextest
         rust-analyzer
         cargo-wizard
+        cargo-bloat
         bacon
 
         # Prose
