@@ -12,7 +12,7 @@ use crate::{
     renderer::{CodeblockHighlighter, escape_html},
 };
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SyntectHighlighter {}
 impl CodeblockHighlighter for SyntectHighlighter {
     fn render_codeblock(&self, source: &str, language: Option<&str>) -> Html {

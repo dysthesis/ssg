@@ -17,8 +17,8 @@ pub trait MathRenderer {
 /// Renderer for parsed Markdown events to HTML
 pub struct Renderer<H, M>
 where
-    H: CodeblockHighlighter,
-    M: MathRenderer,
+    H: CodeblockHighlighter + Send + Clone,
+    M: MathRenderer + Send + Clone,
 {
     /// How to highlight code blocks
     code_block_highlighter: H,
@@ -28,9 +28,10 @@ where
 
 impl<H, M> Renderer<H, M>
 where
-    H: CodeblockHighlighter,
-    M: MathRenderer,
+    H: CodeblockHighlighter + Send + Clone,
+    M: MathRenderer + Send + Clone,
 {
+    /// Construct a new instance of a renderer
     pub fn new(code_block_highlighter: H, math_renderer: M) -> Self {
         Self {
             code_block_highlighter,
@@ -47,15 +48,22 @@ where
 
         let mut translated_events: Vec<Event<'a>> = Vec::new();
 
+        // Translate interesting events, i.e., those we want to handle different
+        // from how pulldown_cmark handles it.
         while let Some(event) = parser.next() {
             match event {
+                // Parse a code block
                 Event::Start(Tag::CodeBlock(kind)) => {
                     let language: Option<String> = match kind {
                         pulldown_cmark::CodeBlockKind::Fenced(lang) => Some(lang.into_string()),
-                        _ => None,
+                        // TODO: Figure out what best to do with indented code
+                        // blocks
+                        pulldown_cmark::CodeBlockKind::Indented => None,
                     };
+
                     let mut code = String::new();
 
+                    // Parse the inner content of code blocks
                     for inner in parser.by_ref() {
                         match inner {
                             Event::End(TagEnd::CodeBlock) => break,
@@ -71,19 +79,25 @@ where
                         }
                     }
 
+                    // Highlight code block
+                    // TODO: Make a job queue to parallelise this
                     let highlighted = self
                         .code_block_highlighter
                         .render_codeblock(&code, language.as_deref())
                         .to_string();
                     translated_events.push(Event::Html(CowStr::from(highlighted)));
                 }
+                // Render inline maths (delimited by $single dolar signs$)
                 Event::InlineMath(source) => {
+                    // Render inline math to MathML.
+                    // TODO: Make a job stealing queue to parallelise this
                     let rendered = self
                         .math_renderer
                         .render_math(source.as_ref(), false)
                         .to_string();
                     translated_events.push(Event::InlineHtml(CowStr::from(rendered)));
                 }
+                // Render inline maths (delimited by $single dolar signs$)
                 Event::DisplayMath(source) => {
                     let rendered = self
                         .math_renderer
@@ -91,13 +105,16 @@ where
                         .to_string();
                     translated_events.push(Event::Html(CowStr::from(rendered)));
                 }
+
+                // Keep everything else the same
                 other => translated_events.push(other),
             }
         }
 
         let mut output = String::new();
-        html::push_html(&mut output, translated_events.into_iter());
 
+        // Leave it to pulldown_cmark to translate everything else
+        html::push_html(&mut output, translated_events.into_iter());
         Html::from(output)
     }
 }

@@ -7,7 +7,7 @@ use crate::{
 };
 
 /// Renders LaTeX to KaTeX HTML + MathML without requiring client-side JS.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct KatexRenderer;
 
 impl KatexRenderer {
