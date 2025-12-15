@@ -46,7 +46,29 @@ where
     where
         E: IntoIterator<Item = Event<'a>>,
     {
-        let mut parser = events.into_iter().peekable();
+        // Single-pass collection with job detection
+        let mut events_vec: Vec<Event<'a>> = Vec::new();
+        let mut has_jobs = false;
+
+        for event in events {
+            if matches!(
+                event,
+                Event::Start(Tag::CodeBlock(_)) | Event::InlineMath(_) | Event::DisplayMath(_)
+            ) {
+                has_jobs = true;
+            }
+            events_vec.push(event);
+        }
+
+        // Fast path: no jobs, render directly
+        if !has_jobs {
+            let mut output = String::new();
+            html::push_html(&mut output, events_vec.into_iter());
+            return Ok(Html::from(output));
+        }
+
+        // Slow path: existing job-based rendering
+        let mut parser = events_vec.into_iter().peekable();
         let mut translated_events: Vec<Event<'static>> = Vec::new();
 
         // Storage for job source data - these need to live until jobs are executed
