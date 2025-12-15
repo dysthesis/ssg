@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use color_eyre::{Section, eyre::Result};
 use pulldown_cmark::{CowStr, Event};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
@@ -92,6 +94,19 @@ where
     }
 }
 
+/// Global thread pool initialisation
+fn jobs_pool() -> Result<&'static rayon::ThreadPool> {
+    static POOL: OnceLock<rayon::ThreadPool> = OnceLock::new();
+    POOL.get_or_try_init(|| {
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(NUM_THREADS)
+            .build()
+    })
+    .with_note(
+        || "While initialising the global thread pool for processing fragment rendering jobs.",
+    )
+}
+
 /// A queue of rendering jobs to execute.
 pub struct Jobs<'a>(Vec<&'a dyn Job>);
 impl<'a> Jobs<'a> {
@@ -109,12 +124,7 @@ impl<'a> Jobs<'a> {
 
     /// Run jobs in parallel
     pub fn execute_par(&self) -> Result<Vec<(usize, Event<'static>)>> {
-        let thread_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(NUM_THREADS)
-            .build()
-            .with_note(
-                || "Encountered while constructing a thread pool for rendering page in parllel",
-            )?;
+        let thread_pool = jobs_pool()?;
 
         Ok(thread_pool.install(|| self.0.par_iter().map(|job| job.execute()).collect()))
     }

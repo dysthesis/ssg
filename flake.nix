@@ -18,7 +18,8 @@
           ];
         };
 
-        craneLib = crane.mkLib pkgs;
+        rustToolchain = pkgs.rust-bin.nightly.latest.default;
+        craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
 
         # Common arguments can be set here to avoid repeating them later
         # NOTE: changes here will rebuild all dependency crates

@@ -1,3 +1,4 @@
+#![feature(once_cell_try)]
 pub mod document;
 pub mod renderer;
 
