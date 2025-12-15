@@ -27,6 +27,9 @@
         # Criterion benchmarks
         gnuplot
 
+        # Benchmarking
+        hyperfine
+
         # Prose
         valeConfigured
       ];
