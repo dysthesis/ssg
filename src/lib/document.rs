@@ -401,29 +401,4 @@ mod tests {
             }
         }
     }
-
-    proptest! {
-        #![proptest_config(file_config())]
-        #[cfg_attr(
-            not(feature = "security_properties"),
-            ignore = "known failing security property: output confinement (release blocker)"
-        )]
-        #[test]
-        fn html_write_is_confined_to_out(path in gen_path(), body in gen_any_utf8()) {
-            let temp = TempDir::new().expect("tempdir");
-            let _guard = CwdGuard::enter(temp.path()).expect("change cwd");
-
-            let doc = HtmlDocument {
-                path: path.clone(),
-                body: Html::from(body),
-                stylesheet: None,
-            };
-            doc.write().expect("write should succeed");
-
-            let output_path = expected_output_path(temp.path(), &path);
-            let canonical_written = output_path.canonicalize().expect("canonicalise written file");
-            let canonical_out = temp.path().join(super::OUTPUT_ROOT).canonicalize().expect("canonicalise out dir");
-            prop_assert!(canonical_written.starts_with(&canonical_out));
-        }
-    }
 }

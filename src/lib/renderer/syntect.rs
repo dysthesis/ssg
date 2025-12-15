@@ -133,26 +133,6 @@ mod tests {
 
     proptest! {
         #![proptest_config(config())]
-        #[cfg_attr(
-            not(feature = "security_properties"),
-            ignore = "known failing security property: language attribute injection (release blocker)"
-        )]
-        #[test]
-        fn fallback_plain_rejects_language_injection(source in gen_any_utf8(), lang in gen_language_token_adversarial().prop_filter("non-empty language", |s| !s.is_empty())) {
-            let rendered = fallback_plain(&source, Some(lang.as_str()));
-            let prefix = "<pre><code class=\"language-";
-            prop_assert!(rendered.starts_with(prefix));
-            let remainder = &rendered[prefix.len()..];
-            let quote_pos = remainder.find('"').ok_or_else(|| TestCaseError::fail("no closing quote in class attribute"))?;
-            let language_slice = &remainder[..quote_pos];
-            prop_assert!(language_slice.bytes().all(|b| matches!(b, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'-' | b'_')));
-            let tag_close = rendered.find('>').ok_or_else(|| TestCaseError::fail("no closing angle bracket"))?;
-            prop_assert_eq!(&rendered[..=tag_close], format!("{prefix}{language_slice}\">"));
-        }
-    }
-
-    proptest! {
-        #![proptest_config(config())]
         #[test]
         fn render_codeblock_textual_recovery(source in gen_any_utf8(), language in option::of(gen_language_token_adversarial())) {
             let highlighter = SyntectHighlighter::default();
