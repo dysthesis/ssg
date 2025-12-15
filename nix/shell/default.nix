@@ -20,6 +20,7 @@
         cargo-nextest
         rust-analyzer
         cargo-wizard
+        cargo-tarpaulin
         cargo-bloat
         bacon
 
