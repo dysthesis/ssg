@@ -1,4 +1,8 @@
-{ craneLib, src, ... }:
+{
+  craneLib,
+  src,
+  ...
+}:
 craneLib.cargoFmt {
   inherit src;
 }

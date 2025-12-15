@@ -52,7 +52,7 @@ fn main() -> Result<()> {
         error!("Failed to open some directory entries: {errors:?}");
     }
 
-    let parsed_documents: Vec<Document> = source_documents
+    let _parsed_documents: Vec<Document> = source_documents
         .iter()
         .map(|(doc, content)| Document::new(doc.path().into(), content))
         .collect();
