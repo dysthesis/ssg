@@ -154,13 +154,15 @@ mod tests {
         }
     }
 
+    type CodeCallLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
     #[derive(Clone, Debug)]
     struct RecordingHighlighter {
-        calls: Arc<Mutex<Vec<(String, Option<String>)>>>,
+        calls: CodeCallLog,
     }
 
     impl RecordingHighlighter {
-        fn new(calls: Arc<Mutex<Vec<(String, Option<String>)>>>) -> Self {
+        fn new(calls: CodeCallLog) -> Self {
             Self { calls }
         }
     }

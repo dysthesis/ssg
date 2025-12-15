@@ -1,5 +1,3 @@
-#![cfg(test)]
-
 use std::path::PathBuf;
 
 use proptest::collection;

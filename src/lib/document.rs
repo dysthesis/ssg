@@ -285,7 +285,7 @@ mod tests {
     }
 
     fn feature_markdown() -> impl Strategy<Value = String> {
-        let fragments = vec![
+        let fragments = [
             "[^1]\n\n[^1]: footnote here".to_string(),
             "|a|b|\n|---|---|\n|1|2|".to_string(),
             "Inline math $x+y$ and display:\n\n$$z=1$$".to_string(),
@@ -306,17 +306,20 @@ mod tests {
     }
 
     fn contains_feature_specific_event(events: &[Event<'_>]) -> bool {
-        events.iter().any(|event| match event {
-            Event::FootnoteReference(_) => true,
-            Event::Start(Tag::FootnoteDefinition(_)) => true,
-            Event::Start(Tag::Table(_)) => true,
-            Event::Start(Tag::TableHead)
-            | Event::Start(Tag::TableRow)
-            | Event::Start(Tag::TableCell) => true,
-            Event::Start(Tag::Strikethrough) => true,
-            Event::InlineMath(_) | Event::DisplayMath(_) => true,
-            Event::Start(Tag::MetadataBlock(_)) => true,
-            _ => false,
+        events.iter().any(|event| {
+            matches!(
+                event,
+                Event::FootnoteReference(_)
+                    | Event::Start(Tag::FootnoteDefinition(_))
+                    | Event::Start(Tag::Table(_))
+                    | Event::Start(Tag::TableHead)
+                    | Event::Start(Tag::TableRow)
+                    | Event::Start(Tag::TableCell)
+                    | Event::Start(Tag::Strikethrough)
+                    | Event::InlineMath(_)
+                    | Event::DisplayMath(_)
+                    | Event::Start(Tag::MetadataBlock(_))
+            )
         })
     }
 
