@@ -20,7 +20,7 @@ pub fn main() {
 
 > This is some block quote!
 
-The Schwarzschild radius is given by
+This is an inline equation: $\int^\infty_0 x\; dx$. The Schwarzschild radius is given by
 
 $$
   r_s = \frac{2GM}{c^2}

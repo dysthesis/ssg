@@ -14,6 +14,21 @@ fn main() -> Result<()> {
 
     let output_dir = input_dir.join("out");
 
+    let stylesheet = {
+        let path = input_dir.join("style.css");
+        if path.is_file() {
+            match read_to_string(&path) {
+                Ok(content) => Some(content),
+                Err(error) => {
+                    error!("Failed to read stylesheet {path:?}: {error}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    };
+
     println!(
         r#"
     Input directory:    {input_dir:?}
@@ -55,7 +70,7 @@ fn main() -> Result<()> {
     let mut write_errors: Vec<std::io::Error> = Vec::new();
 
     for (doc, content) in source_documents {
-        let document = Document::new(doc.path().into(), &content);
+        let document = Document::new(doc.path().into(), &content, stylesheet.clone());
         let parsed = document.parse();
         let html = parsed.build();
         if let Err(error) = html.write() {

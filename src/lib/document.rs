@@ -74,11 +74,11 @@ pub struct Document<'a> {
 
 impl<'a> Document<'a> {
     /// Construct a new document given the path, content, and stylesheet.
-    pub fn new(path: PathBuf, content: &'a str) -> Document<'a> {
+    pub fn new(path: PathBuf, content: &'a str, stylesheet: Option<String>) -> Document<'a> {
         Document {
             path,
             content,
-            stylesheet: None,
+            stylesheet,
         }
     }
 }
@@ -189,12 +189,18 @@ impl Writeable for HtmlDocument {
 
         let mut writer = BufWriter::new(File::create(&output_path)?);
 
+        let stylesheet_block = match &stylesheet {
+            Some(css) => format!("  <style>\n{css}\n  </style>\n"),
+            None => String::new(),
+        };
+
         // Write the rendered HTML page
         write!(
             writer,
-            "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{title}</title>\n  {katex}\n</head>\n<body>\n{body}\n</body>\n</html>\n",
+            "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{title}</title>\n  {katex}\n{stylesheet}</head>\n<body>\n{body}\n</body>\n</html>\n",
             title = title,
             katex = KATEX_STYLESHEET_LINK,
+            stylesheet = stylesheet_block,
             body = content,
         )?;
 
