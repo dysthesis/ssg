@@ -53,14 +53,9 @@ fn main() -> Result<()> {
     }
 
     let parsed_documents: Vec<Document> = source_documents
-        .into_iter()
+        .iter()
         .map(|(doc, content)| Document::new(doc.path().into(), content))
         .collect();
-
-    parsed_documents
-        .iter()
-        .map(|d| d.parse())
-        .for_each(|s| println!("{s}"));
 
     Ok(())
 }

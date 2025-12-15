@@ -19,3 +19,10 @@ pub fn main() {
 
 
 > This is some block quote!
+
+The Schwarzschild radius is given by
+
+$$
+  r_s = \frac{2GM}{c^2}
+$$
+
