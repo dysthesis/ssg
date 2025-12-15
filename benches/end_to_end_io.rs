@@ -10,7 +10,6 @@ use criterion::{
     measurement::WallTime,
 };
 use libssg::document::{Buildable, Document, Parseable, Writeable};
-use std::fs;
 use std::hint::black_box;
 use std::path::PathBuf;
 use tempfile::TempDir;

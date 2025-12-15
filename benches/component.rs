@@ -11,7 +11,7 @@ use criterion::{
     measurement::WallTime,
 };
 use libssg::document::Html;
-use libssg::document::{Buildable, Document, Parseable};
+use libssg::document::{Document, Parseable};
 use libssg::renderer::{CodeblockHighlighter, MathRenderer, Renderer};
 use pulldown_cmark::Event;
 use std::hint::black_box;
@@ -25,7 +25,7 @@ fn configure_component_group(group: &mut BenchmarkGroup<WallTime>) {
         .significance_level(0.01)
         .noise_threshold(0.02)
         .warm_up_time(std::time::Duration::from_secs(2))
-        .measurement_time(std::time::Duration::from_secs(8))
+        .measurement_time(std::time::Duration::from_secs(14))
         .sample_size(100);
 }
 

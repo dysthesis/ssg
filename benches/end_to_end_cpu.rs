@@ -12,7 +12,7 @@ use criterion::{
 use libssg::document::process_documents_in_memory;
 use std::hint::black_box;
 use std::path::PathBuf;
-use util::{CorpusCache, load_corpus};
+use util::load_corpus;
 
 /// Configure an end-to-end CPU benchmark group
 fn configure_e2e_cpu_group(group: &mut BenchmarkGroup<WallTime>) {
@@ -21,7 +21,7 @@ fn configure_e2e_cpu_group(group: &mut BenchmarkGroup<WallTime>) {
         .significance_level(0.01)
         .noise_threshold(0.02)
         .warm_up_time(std::time::Duration::from_secs(3))
-        .measurement_time(std::time::Duration::from_secs(12))
+        .measurement_time(std::time::Duration::from_secs(82))
         .sample_size(50);
 }
 

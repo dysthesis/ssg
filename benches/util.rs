@@ -1,10 +1,12 @@
 //! Utilities for loading and validating benchmark corpus files
 
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 const CORPUS_DIR: &str = "benches/corpora";
 const MANIFEST_PATH: &str = "benches/corpora/manifest.json";
@@ -188,6 +190,7 @@ pub fn load_snippet(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #![allow(unused_imports)]
     use super::*;
 
     #[test]
@@ -200,24 +203,23 @@ mod tests {
     #[test]
     fn test_corpus_file_loads_and_validates() {
         let file = CorpusFile::load("plain/1k.md").expect("Failed to load corpus file");
-        assert!(file.content.len() > 0);
+        assert!(!file.content.is_empty());
         assert_eq!(file.metadata.family, "plain");
     }
 
     #[test]
     fn test_corpus_cache() {
         let mut cache = CorpusCache::new();
-        let file = cache.load("plain/1k.md").expect("Failed to load");
-        assert!(file.content.len() > 0);
+        cache.load("plain/1k.md").expect("Failed to load");
 
-        let file2 = cache.get("plain/1k.md").expect("File should be cached");
-        assert_eq!(file.content, file2.content);
+        let file = cache.get("plain/1k.md").expect("File should be cached");
+        assert!(!file.content.is_empty());
     }
 
     #[test]
     fn test_load_family() {
         let mut cache = CorpusCache::new();
         let files = cache.load_family("plain").expect("Failed to load family");
-        assert!(files.len() > 0);
+        assert!(!files.is_empty());
     }
 }
