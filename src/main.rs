@@ -1,6 +1,6 @@
 use color_eyre::{Section, eyre::Result};
 use itertools::{Either, Itertools};
-use libssg::document::Document;
+use libssg::document::{Buildable, Document, Parseable, Writeable};
 use std::{env::current_dir, fs::read_to_string};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
@@ -12,7 +12,7 @@ fn main() -> Result<()> {
     let input_dir =
         current_dir().with_note(|| "While getting current working directory for the input.")?;
 
-    let output_dir = input_dir.join("result");
+    let output_dir = input_dir.join("out");
 
     println!(
         r#"
@@ -52,10 +52,20 @@ fn main() -> Result<()> {
         error!("Failed to open some directory entries: {errors:?}");
     }
 
-    let _parsed_documents: Vec<Document> = source_documents
-        .iter()
-        .map(|(doc, content)| Document::new(doc.path().into(), content))
-        .collect();
+    let mut write_errors: Vec<std::io::Error> = Vec::new();
+
+    for (doc, content) in source_documents {
+        let document = Document::new(doc.path().into(), &content);
+        let parsed = document.parse();
+        let html = parsed.build();
+        if let Err(error) = html.write() {
+            write_errors.push(error);
+        }
+    }
+
+    if !write_errors.is_empty() {
+        error!("Failed to write some documents: {write_errors:?}");
+    }
 
     Ok(())
 }
