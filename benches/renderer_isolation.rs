@@ -121,7 +121,9 @@ fn render_translation_minimal_overhead(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
+                    let html = renderer
+                        .render(black_box(events))
+                        .expect("render should succeed");
                     black_box(html);
                 },
                 criterion::BatchSize::SmallInput,
@@ -143,7 +145,9 @@ fn render_translation_minimal_overhead(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
+                    let html = renderer
+                        .render(black_box(events))
+                        .expect("render should succeed");
                     black_box(html);
                 },
                 criterion::BatchSize::SmallInput,
@@ -179,7 +183,9 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
+                    let html = renderer
+                        .render(black_box(events))
+                        .expect("render should succeed");
                     black_box(html);
                 },
                 criterion::BatchSize::SmallInput,
@@ -201,7 +207,9 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
+                    let html = renderer
+                        .render(black_box(events))
+                        .expect("render should succeed");
                     black_box(html);
                 },
                 criterion::BatchSize::SmallInput,

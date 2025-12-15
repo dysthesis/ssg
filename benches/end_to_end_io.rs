@@ -98,7 +98,7 @@ fn e2e_io_site_small(c: &mut Criterion) {
                     for (path, content) in black_box(docs) {
                         let doc = Document::new(path.clone(), black_box(content), black_box(None));
                         let parsed = doc.parse();
-                        let html = parsed.build();
+                        let html = parsed.build().expect("build should succeed");
                         html.write().expect("write failed");
                     }
 

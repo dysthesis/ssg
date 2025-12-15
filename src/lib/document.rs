@@ -3,6 +3,7 @@
 //! this module instead parses it using pulldown_cmark, and passes it to a
 //! `Renderer` to render the resulting `Event<'_>` to HTML.
 
+use color_eyre::eyre::Result;
 use pulldown_cmark::{Event, Options, Parser};
 use std::{
     env::current_dir,
@@ -63,7 +64,7 @@ pub fn process_documents_in_memory(
         .map(|(path, content)| {
             let doc = Document::new(path.clone(), content, stylesheet.clone());
             let parsed = doc.parse();
-            let html_doc = parsed.build();
+            let html_doc = parsed.build().expect("build should succeed");
 
             let mut buffer = Vec::new();
             html_doc
@@ -81,7 +82,7 @@ pub trait Parseable<T> {
 }
 
 pub trait Buildable<T> {
-    fn build(self) -> T;
+    fn build(self) -> Result<T>;
 }
 
 pub trait Writeable {
@@ -184,19 +185,19 @@ where
     T: Iterator<Item = Event<'a>>,
 {
     /// Consume the event iterator into an HTML body.
-    fn build(self) -> HtmlDocument {
+    fn build(self) -> Result<HtmlDocument> {
         // Construct a default renderer...
         let renderer = Renderer::default();
         // ...and consume the associated event iterator
-        let content = renderer.render(self.iterator);
+        let content = renderer.render(self.iterator)?;
 
         let path = self.path;
         let stylesheet = self.stylesheet;
-        HtmlDocument {
+        Ok(HtmlDocument {
             path,
             body: content,
             stylesheet,
-        }
+        })
     }
 }
 

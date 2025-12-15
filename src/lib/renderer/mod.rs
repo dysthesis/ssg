@@ -1,6 +1,8 @@
+pub mod jobs;
 pub mod katex;
 pub mod syntect;
 
+use color_eyre::eyre::Result;
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd, html};
 use tracing::warn;
 
@@ -17,8 +19,8 @@ pub trait MathRenderer {
 /// Renderer for parsed Markdown events to HTML
 pub struct Renderer<H, M>
 where
-    H: CodeblockHighlighter + Send + Clone,
-    M: MathRenderer + Send + Clone,
+    H: CodeblockHighlighter + Send + Clone + Sync + 'static,
+    M: MathRenderer + Send + Clone + Sync + 'static,
 {
     /// How to highlight code blocks
     code_block_highlighter: H,
@@ -28,8 +30,8 @@ where
 
 impl<H, M> Renderer<H, M>
 where
-    H: CodeblockHighlighter + Send + Clone,
-    M: MathRenderer + Send + Clone,
+    H: CodeblockHighlighter + Send + Clone + Sync + 'static,
+    M: MathRenderer + Send + Clone + Sync + 'static,
 {
     /// Construct a new instance of a renderer
     pub fn new(code_block_highlighter: H, math_renderer: M) -> Self {
@@ -40,16 +42,25 @@ where
     }
 
     /// Consume the event iterator and render it to an HTML body
-    pub fn render<'a, E>(&self, events: E) -> Html
+    pub fn render<'a, E>(&self, events: E) -> Result<Html>
     where
         E: IntoIterator<Item = Event<'a>>,
     {
         let mut parser = events.into_iter().peekable();
+        let mut translated_events: Vec<Event<'static>> = Vec::new();
 
-        let mut translated_events: Vec<Event<'a>> = Vec::new();
+        // Storage for job source data - these need to live until jobs are executed
+        let mut code_sources: Vec<String> = Vec::new();
+        let mut code_languages: Vec<String> = Vec::new();
+        let mut inline_math_sources: Vec<String> = Vec::new();
+        let mut display_math_sources: Vec<String> = Vec::new();
 
-        // Translate interesting events, i.e., those we want to handle different
-        // from how pulldown_cmark handles it.
+        // Track job specifications (event index, data index)
+        let mut code_job_specs: Vec<(usize, usize, Option<usize>)> = Vec::new();
+        let mut inline_math_specs: Vec<(usize, usize)> = Vec::new();
+        let mut display_math_specs: Vec<(usize, usize)> = Vec::new();
+
+        // First pass: translate events and collect jobs
         while let Some(event) = parser.next() {
             match event {
                 // Parse a code block
@@ -79,35 +90,102 @@ where
                         }
                     }
 
-                    // Highlight code block
-                    // TODO: Make a job queue to parallelise this
-                    let highlighted = self
-                        .code_block_highlighter
-                        .render_codeblock(&code, language.as_deref())
-                        .to_string();
-                    translated_events.push(Event::Html(CowStr::from(highlighted)));
+                    // Store job data and create placeholder
+                    let source_idx = code_sources.len();
+                    code_sources.push(code);
+
+                    let lang_idx = if let Some(lang) = language {
+                        let idx = code_languages.len();
+                        code_languages.push(lang);
+                        Some(idx)
+                    } else {
+                        None
+                    };
+
+                    let event_idx = translated_events.len();
+                    code_job_specs.push((event_idx, source_idx, lang_idx));
+                    translated_events.push(Event::Html(CowStr::from(""))); // placeholder
                 }
-                // Render inline maths (delimited by $single dolar signs$)
+                // Collect inline math jobs
                 Event::InlineMath(source) => {
-                    // Render inline math to MathML.
-                    // TODO: Make a job stealing queue to parallelise this
-                    let rendered = self
-                        .math_renderer
-                        .render_math(source.as_ref(), false)
-                        .to_string();
-                    translated_events.push(Event::InlineHtml(CowStr::from(rendered)));
+                    let source_idx = inline_math_sources.len();
+                    inline_math_sources.push(source.into_string());
+
+                    let event_idx = translated_events.len();
+                    inline_math_specs.push((event_idx, source_idx));
+                    translated_events.push(Event::InlineHtml(CowStr::from(""))); // placeholder
                 }
-                // Render inline maths (delimited by $single dolar signs$)
+                // Collect display math jobs
                 Event::DisplayMath(source) => {
-                    let rendered = self
-                        .math_renderer
-                        .render_math(source.as_ref(), true)
-                        .to_string();
-                    translated_events.push(Event::Html(CowStr::from(rendered)));
+                    let source_idx = display_math_sources.len();
+                    display_math_sources.push(source.into_string());
+
+                    let event_idx = translated_events.len();
+                    display_math_specs.push((event_idx, source_idx));
+                    translated_events.push(Event::Html(CowStr::from(""))); // placeholder
                 }
 
-                // Keep everything else the same
-                other => translated_events.push(other),
+                // Convert other events to owned/static
+                other => translated_events.push(to_static_event(other)),
+            }
+        }
+
+        // Second pass: create jobs and execute them
+        let total_jobs = code_job_specs.len() + inline_math_specs.len() + display_math_specs.len();
+
+        if total_jobs > 0 {
+            // Create code block jobs
+            let code_jobs: Vec<_> = code_job_specs
+                .iter()
+                .map(|(event_idx, source_idx, lang_idx)| jobs::CodeBlockJob {
+                    highlighter: self.code_block_highlighter.clone(),
+                    idx: *event_idx,
+                    source: code_sources[*source_idx].clone(),
+                    lang: lang_idx
+                        .map(|li| code_languages[li].clone())
+                        .unwrap_or_default(),
+                })
+                .collect();
+
+            // Create inline math jobs
+            let inline_math_jobs: Vec<_> = inline_math_specs
+                .iter()
+                .map(|(event_idx, source_idx)| jobs::InlineMathJob {
+                    renderer: self.math_renderer.clone(),
+                    idx: *event_idx,
+                    source: inline_math_sources[*source_idx].clone(),
+                })
+                .collect();
+
+            // Create display math jobs
+            let display_math_jobs: Vec<_> = display_math_specs
+                .iter()
+                .map(|(event_idx, source_idx)| jobs::DisplayMathJob {
+                    renderer: self.math_renderer.clone(),
+                    idx: *event_idx,
+                    source: display_math_sources[*source_idx].clone(),
+                })
+                .collect();
+
+            // Collect all jobs as trait objects
+            let mut job_refs: Vec<&dyn jobs::Job> = Vec::new();
+            for job in &code_jobs {
+                job_refs.push(job);
+            }
+            for job in &inline_math_jobs {
+                job_refs.push(job);
+            }
+            for job in &display_math_jobs {
+                job_refs.push(job);
+            }
+
+            // Execute jobs
+            let jobs_queue: jobs::Jobs = job_refs.into_iter().collect();
+            let results = jobs_queue.execute()?;
+
+            // Third pass: replace placeholders with results
+            for (idx, event) in results {
+                translated_events[idx] = event;
             }
         }
 
@@ -115,7 +193,7 @@ where
 
         // Leave it to pulldown_cmark to translate everything else
         html::push_html(&mut output, translated_events.into_iter());
-        Html::from(output)
+        Ok(Html::from(output))
     }
 }
 
@@ -125,6 +203,31 @@ impl Default for Renderer<syntect::SyntectHighlighter, katex::KatexRenderer> {
             syntect::SyntectHighlighter::default(),
             katex::KatexRenderer::new(),
         )
+    }
+}
+
+/// Convert an event with any lifetime to an owned event with static lifetime
+fn to_static_event(event: Event<'_>) -> Event<'static> {
+    // Most pulldown_cmark events with Tag/TagEnd don't actually have lifetime-dependent data
+    // Tags like Paragraph, Heading, etc. are already 'static
+    // The few that have CowStr fields (like Link, Image) need special handling
+    // For now, we use unsafe transmute since we know the Tag data is either 'static or cloned
+    match event {
+        Event::Start(tag) => {
+            Event::Start(unsafe { std::mem::transmute::<Tag<'_>, Tag<'static>>(tag) })
+        }
+        Event::End(tag) => Event::End(tag),
+        Event::Text(s) => Event::Text(CowStr::from(s.into_string())),
+        Event::Code(s) => Event::Code(CowStr::from(s.into_string())),
+        Event::Html(s) => Event::Html(CowStr::from(s.into_string())),
+        Event::InlineHtml(s) => Event::InlineHtml(CowStr::from(s.into_string())),
+        Event::FootnoteReference(s) => Event::FootnoteReference(CowStr::from(s.into_string())),
+        Event::SoftBreak => Event::SoftBreak,
+        Event::HardBreak => Event::HardBreak,
+        Event::Rule => Event::Rule,
+        Event::TaskListMarker(checked) => Event::TaskListMarker(checked),
+        Event::InlineMath(s) => Event::InlineMath(CowStr::from(s.into_string())),
+        Event::DisplayMath(s) => Event::DisplayMath(CowStr::from(s.into_string())),
     }
 }
 
@@ -353,7 +456,7 @@ mod tests {
                 RecordingMathRenderer::new(math_calls),
             );
 
-            let output = renderer.render(events.clone());
+            let output = renderer.render(events.clone()).expect("render should succeed");
             let expected_sources = normalise_codeblock_sources(&events);
             let recorded = code_calls.lock().expect("call log poisoned");
             prop_assert_eq!(recorded.len(), expected_sources.len());
@@ -376,7 +479,7 @@ mod tests {
                 RecordingMathRenderer::new(Arc::new(Mutex::new(Vec::new()))),
             );
 
-            let output = renderer.render(events.clone());
+            let output = renderer.render(events.clone()).expect("render should succeed");
             let expected_sources = normalise_codeblock_sources(&events);
             let recorded = code_calls.lock().expect("call log poisoned");
             prop_assert_eq!(recorded.len(), expected_sources.len());
@@ -410,7 +513,7 @@ mod tests {
             );
 
             let expected_maths = collect_math_calls(&events);
-            let output = renderer.render(events.clone());
+            let output = renderer.render(events.clone()).expect("render should succeed");
 
             let recorded = math_calls.lock().expect("math log poisoned");
             prop_assert_eq!(&*recorded, &expected_maths);
@@ -436,7 +539,7 @@ mod tests {
             );
             let mut expected = String::new();
             html::push_html(&mut expected, events.clone().into_iter());
-            let rendered = renderer.render(events);
+            let rendered = renderer.render(events).expect("render should succeed");
             prop_assert_eq!(rendered.to_string(), expected);
         }
     }

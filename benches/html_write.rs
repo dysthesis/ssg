@@ -43,7 +43,7 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
     let make_html_doc = |corpus: &util::CorpusFile, stylesheet: Option<String>| {
         let doc = Document::new(PathBuf::from("test.md"), corpus.as_str(), stylesheet);
         let parsed = doc.parse();
-        parsed.build()
+        parsed.build().expect("build should succeed")
     };
 
     // Helper to measure output size

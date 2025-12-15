@@ -6,7 +6,7 @@ use std::{env::current_dir, fs::read_to_string};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
 
-#[cfg_attr(not(test), no_panic::no_panic)]
+#[cfg_attr(all(not(debug_assertions), not(test)), no_panic::no_panic)]
 fn main() -> Result<()> {
     // Install error logging
     color_eyre::install()?;
@@ -69,14 +69,13 @@ fn main() -> Result<()> {
         error!("Failed to open some directory entries: {errors:?}");
     }
 
-    let write_errors: Vec<std::io::Error> = source_documents
+    let write_errors: Vec<color_eyre::Report> = source_documents
         .par_iter()
         .map(|(doc, content)| (doc.path().to_path_buf(), content))
         .map(|(doc, content)| Document::new(doc, content, stylesheet.clone()))
         .map(|doc| doc.parse())
-        .map(|parsed| parsed.build())
-        .map(|html| html.write())
-        .filter_map(|res| res.err())
+        .filter_map(|parsed| parsed.build().ok())
+        .filter_map(|html| html.write().err().map(color_eyre::Report::from))
         .collect();
 
     if !write_errors.is_empty() {

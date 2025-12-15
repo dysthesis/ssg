@@ -139,7 +139,9 @@ fn render_push_html_no_specials(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
+                    let html = renderer
+                        .render(black_box(events))
+                        .expect("render should succeed");
                     black_box(html);
                 },
                 criterion::BatchSize::SmallInput,

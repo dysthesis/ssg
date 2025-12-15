@@ -62,6 +62,7 @@ harness = false
 [[bench]]
 name = "cold_start"
 harness = false
+required-features = ["bench"]
 
 [profile.release]
 strip = true
