@@ -14,10 +14,13 @@ syntect = { version = "5.3.0", default-features = false, features = ["default-fa
 no-panic = { version = "0.1.35", default-features = false }
 
 [dev-dependencies]
-criterion = "0.8.0"
+criterion = { version = "0.8.0", features = ["html_reports"] }
 proptest = "1.9.0"
 proptest-derive = "0.7.0"
 tempfile = "3.13.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
 
 [lib]
 name = "libssg"
@@ -27,6 +30,38 @@ path = "src/lib/mod.rs"
 name = "ssg"
 path = "src/main.rs"
 
+[[bin]]
+name = "cold_start_helper"
+path = "src/bin/cold_start_helper.rs"
+
+[[bench]]
+name = "micro"
+harness = false
+
+[[bench]]
+name = "component"
+harness = false
+
+[[bench]]
+name = "renderer_isolation"
+harness = false
+
+[[bench]]
+name = "html_write"
+harness = false
+
+[[bench]]
+name = "end_to_end_cpu"
+harness = false
+
+[[bench]]
+name = "end_to_end_io"
+harness = false
+
+[[bench]]
+name = "cold_start"
+harness = false
+
 [profile.release]
 strip = true
 lto = true
@@ -34,4 +69,5 @@ codegen-units = 1
 panic = "abort"
 
 [features]
-security_properties = []
+dhat-heap = []    
+dhat-ad-hoc = []  

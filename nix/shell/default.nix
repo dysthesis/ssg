@@ -24,6 +24,9 @@
         cargo-bloat
         bacon
 
+        # Criterion benchmarks
+        gnuplot
+
         # Prose
         valeConfigured
       ];

@@ -26,6 +26,55 @@ const PARSE_OPTIONS: [Options; 5] = [
 
 const OUTPUT_ROOT: &str = "out";
 
+/// Compute the output path for a given input path relative to a working directory
+/// without touching the filesystem.
+pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> PathBuf {
+    let relative_path = if input_path.is_absolute() {
+        input_path
+            .strip_prefix(working_dir)
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| {
+                input_path
+                    .ancestors()
+                    .last()
+                    .and_then(|root| input_path.strip_prefix(root).ok())
+                    .map(PathBuf::from)
+            })
+            .unwrap_or_else(|| input_path.to_path_buf())
+    } else {
+        input_path.to_path_buf()
+    };
+
+    let mut output_path = Path::new(OUTPUT_ROOT).join(relative_path);
+    output_path.set_extension("html");
+    output_path
+}
+
+/// Process multiple documents in-memory without filesystem operations.
+/// This is useful for benchmarking CPU-only performance.
+pub fn process_documents_in_memory(
+    documents: &[(PathBuf, String)],
+    stylesheet: Option<String>,
+) -> Vec<(PathBuf, String)> {
+    documents
+        .iter()
+        .map(|(path, content)| {
+            let doc = Document::new(path.clone(), content, stylesheet.clone());
+            let parsed = doc.parse();
+            let html_doc = parsed.build();
+
+            let mut buffer = Vec::new();
+            html_doc
+                .write_to(&mut buffer)
+                .expect("writing to memory should not fail");
+            let html_string = String::from_utf8(buffer).expect("HTML should be valid UTF-8");
+
+            (path.clone(), html_string)
+        })
+        .collect()
+}
+
 pub trait Parseable<T> {
     fn parse(self) -> T;
 }
@@ -58,6 +107,18 @@ impl From<String> for Html {
 impl From<&str> for Html {
     fn from(value: &str) -> Self {
         Self(value.to_owned())
+    }
+}
+
+impl Html {
+    /// Get the inner string
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Convert into the inner string
+    pub fn into_string(self) -> String {
+        self.0
     }
 }
 
@@ -112,7 +173,7 @@ where
     /// The path to the Markdown document.
     path: PathBuf,
     /// The event iterator of syntax elements from the original document.
-    iterator: T,
+    pub iterator: T,
     /// The CSS to style the resulting page with.
     stylesheet: Option<String>,
 }
@@ -148,62 +209,61 @@ pub struct HtmlDocument {
     stylesheet: Option<String>,
 }
 
-impl Writeable for HtmlDocument {
-    /// Construct a full HTML document and write it to `./out/{self.path}`.
-    fn write(self) -> std::io::Result<()> {
-        let HtmlDocument {
-            path,
-            body: content,
-            stylesheet,
-        } = self;
+impl HtmlDocument {
+    /// Get a reference to the HTML body
+    pub fn body(&self) -> &Html {
+        &self.body
+    }
 
-        // Figure out where the path should live
-        let cwd = current_dir()?;
-        let relative_path = if path.is_absolute() {
-            path.strip_prefix(&cwd)
-                .ok()
-                .map(PathBuf::from)
-                .or_else(|| {
-                    path.ancestors()
-                        .last()
-                        .and_then(|root| path.strip_prefix(root).ok())
-                        .map(PathBuf::from)
-                })
-                .unwrap_or_else(|| path.clone())
-        } else {
-            path.clone()
-        };
+    /// Get a reference to the path
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
 
-        let mut output_path = Path::new(OUTPUT_ROOT).join(relative_path);
-        output_path.set_extension("html");
+    /// Get a reference to the stylesheet
+    pub fn stylesheet(&self) -> Option<&str> {
+        self.stylesheet.as_deref()
+    }
 
-        if let Some(parent) = output_path.parent() {
-            create_dir_all(parent)?;
-        }
-
-        let title = path
+    /// Write the HTML document to an arbitrary writer
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        let title = self
+            .path
             .file_stem()
             .and_then(|stem| stem.to_str())
             .map(escape_html)
             .unwrap_or_else(|| String::from("Document"));
 
-        let mut writer = BufWriter::new(File::create(&output_path)?);
-
-        let stylesheet_block = match &stylesheet {
+        let stylesheet_block = match &self.stylesheet {
             Some(css) => format!("  <style>\n{css}\n  </style>\n"),
             None => String::new(),
         };
 
-        // Write the rendered HTML page
         write!(
             writer,
             "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{title}</title>\n  {katex}\n{stylesheet}</head>\n<body>\n{body}\n</body>\n</html>\n",
             title = title,
             katex = KATEX_STYLESHEET_LINK,
             stylesheet = stylesheet_block,
-            body = content,
+            body = self.body,
         )?;
 
+        Ok(())
+    }
+}
+
+impl Writeable for HtmlDocument {
+    /// Construct a full HTML document and write it to `./out/{self.path}`.
+    fn write(self) -> std::io::Result<()> {
+        let cwd = current_dir()?;
+        let output_path = compute_output_path(&self.path, &cwd);
+
+        if let Some(parent) = output_path.parent() {
+            create_dir_all(parent)?;
+        }
+
+        let mut writer = BufWriter::new(File::create(&output_path)?);
+        self.write_to(&mut writer)?;
         writer.flush()
     }
 }

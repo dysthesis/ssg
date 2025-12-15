@@ -1,0 +1,21 @@
+use std::collections::HashMap;
+use std::io::{self, Read};
+
+fn main() -> io::Result<()> {
+    let mut buffer = String::new();
+    io::stdin().read_to_string(&mut buffer)?;
+
+    let mut word_counts = HashMap::new();
+    for word in buffer.split_whitespace() {
+        *word_counts.entry(word.to_lowercase()).or_insert(0) += 1;
+    }
+
+    let mut counts: Vec<_> = word_counts.iter().collect();
+    counts.sort_by(|a, b| b.1.cmp(a.1));
+
+    for (word, count) in counts.iter().take(10) {
+        println!("{}: {}", word, count);
+    }
+
+    Ok(())
+}

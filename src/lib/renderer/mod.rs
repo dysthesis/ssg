@@ -111,7 +111,7 @@ impl Default for Renderer<syntect::SyntectHighlighter, katex::KatexRenderer> {
     }
 }
 
-pub(super) fn escape_html(raw: &str) -> String {
+pub fn escape_html(raw: &str) -> String {
     let mut escaped = String::with_capacity(raw.len());
     for ch in raw.chars() {
         match ch {

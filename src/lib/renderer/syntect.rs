@@ -51,7 +51,7 @@ fn theme() -> &'static syntect::highlighting::Theme {
         .expect("syntect default themes should not be empty")
 }
 
-fn fallback_plain(source: &str, language: Option<&str>) -> String {
+pub fn fallback_plain(source: &str, language: Option<&str>) -> String {
     let mut out = String::with_capacity(source.len() + 32);
     out.push_str("<pre><code");
     if let Some(lang) = language {

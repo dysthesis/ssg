@@ -41,7 +41,7 @@ impl MathRenderer for KatexRenderer {
 
 pub const KATEX_STYLESHEET_LINK: &str = r#"<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.4/dist/katex.min.css" crossorigin="anonymous">"#;
 
-fn fallback_plain_math(source: &str, display_mode: bool) -> String {
+pub fn fallback_plain_math(source: &str, display_mode: bool) -> String {
     let mut out = String::with_capacity(source.len() + 32);
     if display_mode {
         out.push_str("<div class=\"math math-display\">");
