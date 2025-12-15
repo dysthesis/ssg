@@ -12,6 +12,7 @@ tracing = { version = "0.1.43", default-features = false }
 walkdir = { version = "2.5.0", default-features = false }
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 no-panic = { version = "0.1.35", default-features = false }
+rayon = { version = "1.11.0", default-features = false }
 
 [dev-dependencies]
 criterion = { version = "0.8.0", features = ["html_reports"] }

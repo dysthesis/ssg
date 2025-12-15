@@ -1,6 +1,7 @@
 use color_eyre::{Section, eyre::Result};
 use itertools::{Either, Itertools};
 use libssg::document::{Buildable, Document, Parseable, Writeable};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{env::current_dir, fs::read_to_string};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
@@ -68,16 +69,15 @@ fn main() -> Result<()> {
         error!("Failed to open some directory entries: {errors:?}");
     }
 
-    let mut write_errors: Vec<std::io::Error> = Vec::new();
-
-    for (doc, content) in source_documents {
-        let document = Document::new(doc.path().into(), &content, stylesheet.clone());
-        let parsed = document.parse();
-        let html = parsed.build();
-        if let Err(error) = html.write() {
-            write_errors.push(error);
-        }
-    }
+    let write_errors: Vec<std::io::Error> = source_documents
+        .par_iter()
+        .map(|(doc, content)| (doc.path().to_path_buf(), content))
+        .map(|(doc, content)| Document::new(doc, content, stylesheet.clone()))
+        .map(|doc| doc.parse())
+        .map(|parsed| parsed.build())
+        .map(|html| html.write())
+        .filter_map(|res| res.err())
+        .collect();
 
     if !write_errors.is_empty() {
         error!("Failed to write some documents: {write_errors:?}");
