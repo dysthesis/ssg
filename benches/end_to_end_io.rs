@@ -10,10 +10,30 @@ use criterion::{
     measurement::WallTime,
 };
 use libssg::document::{Buildable, Document, Parseable, Writeable};
+use std::env::{current_dir, set_current_dir};
 use std::hint::black_box;
 use std::path::PathBuf;
 use tempfile::TempDir;
 use util::load_corpus;
+
+/// Guard that restores the working directory on drop
+struct CwdGuard {
+    original: PathBuf,
+}
+
+impl CwdGuard {
+    fn enter(temp_dir: &TempDir) -> std::io::Result<Self> {
+        let original = current_dir()?;
+        set_current_dir(temp_dir.path())?;
+        Ok(Self { original })
+    }
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = set_current_dir(&self.original);
+    }
+}
 
 /// Configure an end-to-end I/O benchmark group
 fn configure_e2e_io_group(group: &mut BenchmarkGroup<WallTime>) {
@@ -72,12 +92,11 @@ fn e2e_io_site_small(c: &mut Criterion) {
                     TempDir::new().unwrap()
                 },
                 |temp_dir| {
-                    // Measured operation
-                    let temp_path = temp_dir.path();
+                    // Measured operation: change to temp directory and write files
+                    let _guard = CwdGuard::enter(&temp_dir).expect("failed to change directory");
 
                     for (path, content) in black_box(docs) {
-                        let full_path = temp_path.join(path);
-                        let doc = Document::new(full_path, black_box(content), black_box(None));
+                        let doc = Document::new(path.clone(), black_box(content), black_box(None));
                         let parsed = doc.parse();
                         let html = parsed.build();
                         html.write().expect("write failed");

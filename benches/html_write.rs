@@ -46,11 +46,18 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
         parsed.build()
     };
 
+    // Helper to measure output size
+    let measure_output_size = |html_doc: &libssg::document::HtmlDocument| -> usize {
+        let mut buffer = Vec::new();
+        html_doc.write_to(&mut buffer).unwrap();
+        buffer.len()
+    };
+
     // Benchmark 64k with no stylesheet
     let html_64k_none = make_html_doc(&plain_64k, no_stylesheet.clone());
-    let body_size_64k = html_64k_none.body().as_str().len();
+    let output_size_64k_none = measure_output_size(&html_64k_none);
 
-    group.throughput(Throughput::Bytes(body_size_64k as u64));
+    group.throughput(Throughput::Bytes(output_size_64k_none as u64));
     group.bench_with_input(
         BenchmarkId::new("64k", "no_stylesheet"),
         &html_64k_none,
@@ -65,6 +72,9 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
 
     // Benchmark 64k with small stylesheet
     let html_64k_small = make_html_doc(&plain_64k, small_stylesheet.clone());
+    let output_size_64k_small = measure_output_size(&html_64k_small);
+
+    group.throughput(Throughput::Bytes(output_size_64k_small as u64));
     group.bench_with_input(
         BenchmarkId::new("64k", "small_stylesheet"),
         &html_64k_small,
@@ -79,6 +89,9 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
 
     // Benchmark 64k with large stylesheet
     let html_64k_large = make_html_doc(&plain_64k, large_stylesheet.clone());
+    let output_size_64k_large = measure_output_size(&html_64k_large);
+
+    group.throughput(Throughput::Bytes(output_size_64k_large as u64));
     group.bench_with_input(
         BenchmarkId::new("64k", "large_stylesheet"),
         &html_64k_large,
@@ -93,9 +106,9 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
 
     // Benchmark 1m with no stylesheet
     let html_1m_none = make_html_doc(&plain_1m, no_stylesheet);
-    let body_size_1m = html_1m_none.body().as_str().len();
+    let output_size_1m_none = measure_output_size(&html_1m_none);
 
-    group.throughput(Throughput::Bytes(body_size_1m as u64));
+    group.throughput(Throughput::Bytes(output_size_1m_none as u64));
     group.bench_with_input(
         BenchmarkId::new("1m", "no_stylesheet"),
         &html_1m_none,
@@ -110,6 +123,9 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
 
     // Benchmark 1m with large stylesheet
     let html_1m_large = make_html_doc(&plain_1m, large_stylesheet);
+    let output_size_1m_large = measure_output_size(&html_1m_large);
+
+    group.throughput(Throughput::Bytes(output_size_1m_large as u64));
     group.bench_with_input(
         BenchmarkId::new("1m", "large_stylesheet"),
         &html_1m_large,

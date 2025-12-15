@@ -128,9 +128,107 @@ fn e2e_cpu_site_medium(c: &mut Criterion) {
     group.finish();
 }
 
+fn e2e_cpu_large_documents(c: &mut Criterion) {
+    let mut group = c.benchmark_group("e2e_cpu_large_documents");
+    configure_e2e_cpu_group(&mut group);
+
+    // Test 64k and 1m plain documents to catch scaling behavior
+    let documents_64k: Vec<(PathBuf, String)> = vec![
+        (
+            PathBuf::from("plain_64k.md"),
+            load_corpus("plain/64k.md").content,
+        ),
+        (
+            PathBuf::from("mixed_64k.md"),
+            load_corpus("mixed_features/64k.md").content,
+        ),
+    ];
+
+    let total_bytes_64k: usize = documents_64k.iter().map(|(_, c)| c.len()).sum();
+
+    group.throughput(Throughput::Bytes(total_bytes_64k as u64));
+    group.bench_with_input(
+        BenchmarkId::from_parameter("64k_documents"),
+        &documents_64k,
+        |b, docs| {
+            b.iter(|| {
+                let results = process_documents_in_memory(black_box(docs), black_box(None));
+                black_box(results);
+            });
+        },
+    );
+
+    // Test 1m documents
+    let documents_1m: Vec<(PathBuf, String)> = vec![
+        (
+            PathBuf::from("plain_1m.md"),
+            load_corpus("plain/1m.md").content,
+        ),
+        (
+            PathBuf::from("mixed_1m.md"),
+            load_corpus("mixed_features/1m.md").content,
+        ),
+    ];
+
+    let total_bytes_1m: usize = documents_1m.iter().map(|(_, c)| c.len()).sum();
+
+    group.throughput(Throughput::Bytes(total_bytes_1m as u64));
+    group.bench_with_input(
+        BenchmarkId::from_parameter("1m_documents"),
+        &documents_1m,
+        |b, docs| {
+            b.iter(|| {
+                let results = process_documents_in_memory(black_box(docs), black_box(None));
+                black_box(results);
+            });
+        },
+    );
+
+    group.finish();
+}
+
+fn e2e_cpu_stress_dense_features(c: &mut Criterion) {
+    let mut group = c.benchmark_group("e2e_cpu_stress_dense_features");
+    configure_e2e_cpu_group(&mut group);
+
+    // Test the largest code-dense and math-dense documents to catch scaling regressions
+    // These stress the special feature rendering paths
+    let code_dense_1m = load_corpus("code_dense/1m_200blocks.md");
+    let math_dense_1m = load_corpus("math_dense/1m_mixed_valid_invalid.md");
+
+    let documents: Vec<(PathBuf, String)> = vec![
+        (
+            PathBuf::from("code_dense_1m.md"),
+            code_dense_1m.content.clone(),
+        ),
+        (
+            PathBuf::from("math_dense_1m.md"),
+            math_dense_1m.content.clone(),
+        ),
+    ];
+
+    let total_bytes: usize = documents.iter().map(|(_, c)| c.len()).sum();
+
+    group.throughput(Throughput::Bytes(total_bytes as u64));
+    group.bench_with_input(
+        BenchmarkId::from_parameter("1m_dense_features"),
+        &documents,
+        |b, docs| {
+            b.iter(|| {
+                let results = process_documents_in_memory(black_box(docs), black_box(None));
+                black_box(results);
+            });
+        },
+    );
+
+    group.finish();
+}
+
 criterion_group!(
     e2e_cpu_benches,
     e2e_cpu_plain_site_small,
-    e2e_cpu_site_medium
+    e2e_cpu_site_medium,
+    e2e_cpu_large_documents,
+    e2e_cpu_stress_dense_features
 );
 criterion_main!(e2e_cpu_benches);

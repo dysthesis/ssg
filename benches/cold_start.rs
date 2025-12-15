@@ -2,6 +2,16 @@
 //!
 //! These benchmarks measure first-time initialization costs by spawning
 //! fresh processes. They are report-only by default.
+//!
+//! NOTE: These measurements include:
+//! - Process spawn and loader costs
+//! - Command-line argument parsing
+//! - The actual initialization (Syntect or KaTeX setup)
+//! - Process exit
+//!
+//! The `noop` benchmark measures the baseline overhead (everything except
+//! the actual initialization). Subtract `noop` from `syntect` or `katex`
+//! to get the isolated initialization cost.
 
 mod util;
 
@@ -10,7 +20,7 @@ use criterion::{
 };
 use std::hint::black_box;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use util::load_snippet;
 
 /// Configure a cold start benchmark group
@@ -24,6 +34,29 @@ fn configure_cold_start_group(group: &mut BenchmarkGroup<WallTime>) {
         .sample_size(50);
 }
 
+fn cold_start_noop_baseline(c: &mut Criterion) {
+    let mut group = c.benchmark_group("cold_start_noop_baseline");
+    configure_cold_start_group(&mut group);
+
+    // Find the cold_start_helper binary
+    let helper_path = find_helper_binary();
+
+    group.bench_function("noop", |b| {
+        b.iter(|| {
+            let status = Command::new(&helper_path)
+                .arg("noop")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("Failed to execute cold_start_helper");
+
+            black_box(status);
+        });
+    });
+
+    group.finish();
+}
+
 fn cold_start_syntect_first_highlight(c: &mut Criterion) {
     let mut group = c.benchmark_group("cold_start_syntect_first_highlight");
     configure_cold_start_group(&mut group);
@@ -31,25 +64,24 @@ fn cold_start_syntect_first_highlight(c: &mut Criterion) {
     // Find the cold_start_helper binary
     let helper_path = find_helper_binary();
 
-    // Create a temporary file with the code snippet
+    // Load the code snippet (no filesystem I/O during measurement)
     let code_snippet = load_snippet("code_rust_small.txt");
-    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let snippet_path = temp_dir.path().join("snippet.txt");
-    std::fs::write(&snippet_path, &code_snippet).expect("Failed to write snippet");
 
     group.bench_with_input(
         BenchmarkId::from_parameter("rust_small"),
-        &snippet_path,
-        |b, path| {
+        &code_snippet,
+        |b, snippet| {
             b.iter(|| {
-                let output = Command::new(&helper_path)
+                let status = Command::new(&helper_path)
                     .arg("syntect")
-                    .arg(black_box(path))
+                    .arg(black_box(snippet))
                     .arg(black_box("rust"))
-                    .output()
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
                     .expect("Failed to execute cold_start_helper");
 
-                black_box(output);
+                black_box(status);
             });
         },
     );
@@ -64,42 +96,43 @@ fn cold_start_katex_first_render(c: &mut Criterion) {
     // Find the cold_start_helper binary
     let helper_path = find_helper_binary();
 
-    // Create a temporary file with the math snippet
+    // Load the math snippet (no filesystem I/O during measurement)
     let math_snippet = load_snippet("math_simple.tex");
-    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let snippet_path = temp_dir.path().join("math.tex");
-    std::fs::write(&snippet_path, &math_snippet).expect("Failed to write snippet");
 
     group.bench_with_input(
         BenchmarkId::from_parameter("simple_inline"),
-        &snippet_path,
-        |b, path| {
+        &math_snippet,
+        |b, snippet| {
             b.iter(|| {
-                let output = Command::new(&helper_path)
+                let status = Command::new(&helper_path)
                     .arg("katex")
-                    .arg(black_box(path))
+                    .arg(black_box(snippet))
                     .arg(black_box("false"))
-                    .output()
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
                     .expect("Failed to execute cold_start_helper");
 
-                black_box(output);
+                black_box(status);
             });
         },
     );
 
     group.bench_with_input(
         BenchmarkId::from_parameter("simple_display"),
-        &snippet_path,
-        |b, path| {
+        &math_snippet,
+        |b, snippet| {
             b.iter(|| {
-                let output = Command::new(&helper_path)
+                let status = Command::new(&helper_path)
                     .arg("katex")
-                    .arg(black_box(path))
+                    .arg(black_box(snippet))
                     .arg(black_box("true"))
-                    .output()
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
                     .expect("Failed to execute cold_start_helper");
 
-                black_box(output);
+                black_box(status);
             });
         },
     );
@@ -130,6 +163,7 @@ fn find_helper_binary() -> PathBuf {
 
 criterion_group!(
     cold_start_benches,
+    cold_start_noop_baseline,
     cold_start_syntect_first_highlight,
     cold_start_katex_first_render
 );

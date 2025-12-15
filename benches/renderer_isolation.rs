@@ -28,7 +28,32 @@ fn configure_renderer_group(group: &mut BenchmarkGroup<WallTime>) {
         .sample_size(100);
 }
 
-// Stub implementations that mimic the structure without heavy computation
+// Minimal stub implementations that return constant HTML to isolate pure translation overhead
+#[derive(Clone)]
+struct MinimalStubHighlighter;
+
+impl CodeblockHighlighter for MinimalStubHighlighter {
+    fn render_codeblock(&self, _source: &str, _language: Option<&str>) -> Html {
+        // Return a fixed-size constant to isolate translation overhead
+        Html::from("<pre><code>...</code></pre>\n")
+    }
+}
+
+#[derive(Clone)]
+struct MinimalStubMathRenderer;
+
+impl MathRenderer for MinimalStubMathRenderer {
+    fn render_math(&self, _source: &str, display_mode: bool) -> Html {
+        // Return a fixed-size constant to isolate translation overhead
+        if display_mode {
+            Html::from("<div>...</div>")
+        } else {
+            Html::from("<span>...</span>")
+        }
+    }
+}
+
+// Stub implementations that mimic the fallback structure with escaping
 #[derive(Clone)]
 struct StubHighlighter;
 
@@ -71,13 +96,16 @@ impl MathRenderer for StubMathRenderer {
     }
 }
 
-fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
-    let mut group = c.benchmark_group("render_translation_with_stub_highlighter_and_stub_math");
+fn render_translation_minimal_overhead(c: &mut Criterion) {
+    let mut group = c.benchmark_group("render_translation_minimal_overhead");
     configure_renderer_group(&mut group);
 
     // Load inputs
     let code_dense_64k = load_corpus("code_dense/64k_40blocks.md");
     let math_dense_64k = load_corpus("math_dense/64k_valid.md");
+
+    // Create renderer with minimal stubs to isolate pure translation overhead
+    let renderer = Renderer::new(MinimalStubHighlighter, MinimalStubMathRenderer);
 
     // Pre-parse events for code_dense
     let doc = Document::new(PathBuf::from("test.md"), code_dense_64k.as_str(), None);
@@ -90,11 +118,14 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
         BenchmarkId::new("code_dense", "64k"),
         &code_events,
         |b, events| {
-            b.iter(|| {
-                let renderer = Renderer::new(StubHighlighter, StubMathRenderer);
-                let html = renderer.render(black_box(events.clone()));
-                black_box(html);
-            });
+            b.iter_batched(
+                || events.clone(),
+                |events| {
+                    let html = renderer.render(black_box(events));
+                    black_box(html);
+                },
+                criterion::BatchSize::SmallInput,
+            );
         },
     );
 
@@ -109,11 +140,72 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
         BenchmarkId::new("math_dense", "64k"),
         &math_events,
         |b, events| {
-            b.iter(|| {
-                let renderer = Renderer::new(StubHighlighter, StubMathRenderer);
-                let html = renderer.render(black_box(events.clone()));
-                black_box(html);
-            });
+            b.iter_batched(
+                || events.clone(),
+                |events| {
+                    let html = renderer.render(black_box(events));
+                    black_box(html);
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        },
+    );
+
+    group.finish();
+}
+
+fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
+    let mut group = c.benchmark_group("render_translation_with_stub_highlighter_and_stub_math");
+    configure_renderer_group(&mut group);
+
+    // Load inputs
+    let code_dense_64k = load_corpus("code_dense/64k_40blocks.md");
+    let math_dense_64k = load_corpus("math_dense/64k_valid.md");
+
+    // Create renderer with stubs that include escaping (comparable to fallback)
+    let renderer = Renderer::new(StubHighlighter, StubMathRenderer);
+
+    // Pre-parse events for code_dense
+    let doc = Document::new(PathBuf::from("test.md"), code_dense_64k.as_str(), None);
+    let parsed = doc.parse();
+    let code_events: Vec<Event> = parsed.iterator.collect();
+
+    // Benchmark code_dense
+    group.throughput(Throughput::Bytes(code_dense_64k.size_bytes() as u64));
+    group.bench_with_input(
+        BenchmarkId::new("code_dense", "64k"),
+        &code_events,
+        |b, events| {
+            b.iter_batched(
+                || events.clone(),
+                |events| {
+                    let html = renderer.render(black_box(events));
+                    black_box(html);
+                },
+                criterion::BatchSize::SmallInput,
+            );
+        },
+    );
+
+    // Pre-parse events for math_dense
+    let doc = Document::new(PathBuf::from("test.md"), math_dense_64k.as_str(), None);
+    let parsed = doc.parse();
+    let math_events: Vec<Event> = parsed.iterator.collect();
+
+    // Benchmark math_dense
+    group.throughput(Throughput::Bytes(math_dense_64k.size_bytes() as u64));
+    group.bench_with_input(
+        BenchmarkId::new("math_dense", "64k"),
+        &math_events,
+        |b, events| {
+            b.iter_batched(
+                || events.clone(),
+                |events| {
+                    let html = renderer.render(black_box(events));
+                    black_box(html);
+                },
+                criterion::BatchSize::SmallInput,
+            );
         },
     );
 
@@ -303,6 +395,7 @@ fn render_with_katex_warm_success_and_fallback(c: &mut Criterion) {
 
 criterion_group!(
     renderer_isolation_benches,
+    render_translation_minimal_overhead,
     render_translation_with_stub_highlighter_and_stub_math,
     render_with_syntect_warm,
     render_with_katex_warm_success_and_fallback

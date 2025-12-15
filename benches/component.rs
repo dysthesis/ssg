@@ -125,6 +125,9 @@ fn render_push_html_no_specials(c: &mut Criterion) {
         ("1m", load_corpus("plain/1m.md")),
     ];
 
+    // Create renderer once outside the timed loop
+    let renderer = Renderer::new(NoOpHighlighter, NoOpMathRenderer);
+
     for (size, corpus) in inputs.iter() {
         // Pre-parse the events
         let doc = Document::new(PathBuf::from("test.md"), corpus.as_str(), None);
@@ -133,11 +136,14 @@ fn render_push_html_no_specials(c: &mut Criterion) {
 
         group.throughput(Throughput::Bytes(corpus.size_bytes() as u64));
         group.bench_with_input(BenchmarkId::from_parameter(size), &events, |b, events| {
-            b.iter(|| {
-                let renderer = Renderer::new(NoOpHighlighter, NoOpMathRenderer);
-                let html = renderer.render(black_box(events.clone()));
-                black_box(html);
-            });
+            b.iter_batched(
+                || events.clone(),
+                |events| {
+                    let html = renderer.render(black_box(events));
+                    black_box(html);
+                },
+                criterion::BatchSize::SmallInput,
+            );
         });
     }
 

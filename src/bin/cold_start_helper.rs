@@ -7,7 +7,6 @@ use libssg::renderer::katex::KatexRenderer;
 use libssg::renderer::syntect::SyntectHighlighter;
 use libssg::renderer::{CodeblockHighlighter, MathRenderer};
 use std::env;
-use std::fs;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -15,25 +14,27 @@ fn main() {
     if args.len() < 2 {
         eprintln!("Usage: cold_start_helper <operation> [args...]");
         eprintln!("Operations:");
-        eprintln!("  syntect <file> <language> - Highlight code from file");
-        eprintln!("  katex <file> <display_mode> - Render math from file");
+        eprintln!("  noop - Do nothing (baseline for overhead measurement)");
+        eprintln!("  syntect <snippet> <language> - Highlight code snippet");
+        eprintln!("  katex <snippet> <display_mode> - Render math snippet");
         std::process::exit(1);
     }
 
     let operation = &args[1];
 
     match operation.as_str() {
+        "noop" => {
+            // Do nothing - this measures process spawn + arg parse + exit overhead
+        }
         "syntect" => {
             if args.len() < 4 {
-                eprintln!("Usage: cold_start_helper syntect <file> <language>");
+                eprintln!("Usage: cold_start_helper syntect <snippet> <language>");
                 std::process::exit(1);
             }
 
-            let file_path = &args[2];
+            // Take snippet directly from command line to avoid filesystem overhead
+            let source = &args[2];
             let language = &args[3];
-
-            let source = fs::read_to_string(file_path)
-                .unwrap_or_else(|e| panic!("Failed to read file {}: {}", file_path, e));
 
             let highlighter = SyntectHighlighter::default();
             let language_opt = if language == "none" {
@@ -42,26 +43,24 @@ fn main() {
                 Some(language.as_str())
             };
 
-            let _result = highlighter.render_codeblock(&source, language_opt);
+            let _result = highlighter.render_codeblock(source, language_opt);
         }
         "katex" => {
             if args.len() < 4 {
-                eprintln!("Usage: cold_start_helper katex <file> <display_mode>");
+                eprintln!("Usage: cold_start_helper katex <snippet> <display_mode>");
                 std::process::exit(1);
             }
 
-            let file_path = &args[2];
+            // Take snippet directly from command line to avoid filesystem overhead
+            let source = &args[2];
             let display_mode = args[3] == "true";
 
-            let source = fs::read_to_string(file_path)
-                .unwrap_or_else(|e| panic!("Failed to read file {}: {}", file_path, e));
-
             let renderer = KatexRenderer::new();
-            let _result = renderer.render_math(&source, display_mode);
+            let _result = renderer.render_math(source, display_mode);
         }
         _ => {
             eprintln!("Unknown operation: {}", operation);
-            eprintln!("Valid operations: syntect, katex");
+            eprintln!("Valid operations: noop, syntect, katex");
             std::process::exit(1);
         }
     }
