@@ -11,11 +11,13 @@ pulldown-cmark = { version = "0.13.0", default-features = false, features = ["ht
 tracing = { version = "0.1.43", default-features = false }
 walkdir = { version = "2.5.0", default-features = false }
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+no-panic = { version = "0.1.35", default-features = false }
 
 [dev-dependencies]
 criterion = "0.8.0"
 proptest = "1.9.0"
 proptest-derive = "0.7.0"
+tempfile = "3.13.0"
 
 [lib]
 name = "libssg"
@@ -30,3 +32,6 @@ strip = true
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[features]
+security_properties = []

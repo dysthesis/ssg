@@ -207,3 +207,220 @@ impl Writeable for HtmlDocument {
         writer.flush()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(dead_code)]
+    use super::*;
+    use crate::renderer::escape_html;
+    use crate::test_support::{DEFAULT_CASES, FILE_CASES, gen_any_utf8, gen_path};
+    use proptest::prelude::*;
+    use proptest::{collection, option};
+    use pulldown_cmark::Tag;
+    use std::{
+        env::{current_dir, set_current_dir},
+        fs,
+        path::{Path, PathBuf},
+    };
+    use tempfile::TempDir;
+
+    fn config() -> ProptestConfig {
+        ProptestConfig {
+            cases: DEFAULT_CASES,
+            ..ProptestConfig::default()
+        }
+    }
+
+    fn file_config() -> ProptestConfig {
+        ProptestConfig {
+            cases: FILE_CASES,
+            ..ProptestConfig::default()
+        }
+    }
+
+    struct CwdGuard {
+        original: PathBuf,
+    }
+
+    impl CwdGuard {
+        fn enter<P: AsRef<Path>>(path: P) -> std::io::Result<Self> {
+            let original = current_dir()?;
+            set_current_dir(path)?;
+            Ok(Self { original })
+        }
+    }
+
+    impl Drop for CwdGuard {
+        fn drop(&mut self) {
+            let _ = set_current_dir(&self.original);
+        }
+    }
+
+    fn expected_output_path(cwd: &Path, path: &Path) -> PathBuf {
+        let relative_path = if path.is_absolute() {
+            path.strip_prefix(cwd)
+                .ok()
+                .map(PathBuf::from)
+                .or_else(|| {
+                    path.ancestors()
+                        .last()
+                        .and_then(|root| path.strip_prefix(root).ok())
+                        .map(PathBuf::from)
+                })
+                .unwrap_or_else(|| path.to_path_buf())
+        } else {
+            path.to_path_buf()
+        };
+
+        let mut output_path = Path::new(super::OUTPUT_ROOT).join(relative_path);
+        output_path.set_extension("html");
+        output_path
+    }
+
+    fn extract_title(html: &str) -> Option<&str> {
+        let start = html.find("<title>")?;
+        let end = html[start..].find("</title>")?;
+        let title_start = start + "<title>".len();
+        Some(&html[title_start..start + end])
+    }
+
+    fn feature_markdown() -> impl Strategy<Value = String> {
+        let fragments = vec![
+            "[^1]\n\n[^1]: footnote here".to_string(),
+            "|a|b|\n|---|---|\n|1|2|".to_string(),
+            "Inline math $x+y$ and display:\n\n$$z=1$$".to_string(),
+            "---\ntitle: demo\n---".to_string(),
+            "This uses ~~strikethrough~~ text.".to_string(),
+        ];
+        collection::vec(
+            prop_oneof![
+                Just(fragments[0].clone()),
+                Just(fragments[1].clone()),
+                Just(fragments[2].clone()),
+                Just(fragments[3].clone()),
+                Just(fragments[4].clone()),
+            ],
+            1..=fragments.len(),
+        )
+        .prop_map(|parts| parts.join("\n\n"))
+    }
+
+    fn contains_feature_specific_event(events: &[Event<'_>]) -> bool {
+        events.iter().any(|event| match event {
+            Event::FootnoteReference(_) => true,
+            Event::Start(Tag::FootnoteDefinition(_)) => true,
+            Event::Start(Tag::Table(_)) => true,
+            Event::Start(Tag::TableHead)
+            | Event::Start(Tag::TableRow)
+            | Event::Start(Tag::TableCell) => true,
+            Event::Start(Tag::Strikethrough) => true,
+            Event::InlineMath(_) | Event::DisplayMath(_) => true,
+            Event::Start(Tag::MetadataBlock(_)) => true,
+            _ => false,
+        })
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[test]
+        fn parse_applies_options(md in feature_markdown()) {
+            let doc = Document::new(PathBuf::from("sample.md"), &md, None);
+            let ParsedDocument { iterator, .. } = doc.parse();
+            let events: Vec<_> = iterator.collect();
+            prop_assert!(contains_feature_specific_event(&events));
+        }
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[test]
+        fn parse_does_not_panic_on_arbitrary_utf8(input in gen_any_utf8()) {
+            let doc = Document::new(PathBuf::from("input.md"), &input, None);
+            let ParsedDocument { iterator, .. } = doc.parse();
+            let _: Vec<_> = iterator.collect();
+        }
+    }
+
+    proptest! {
+        #![proptest_config(file_config())]
+        #[test]
+        fn html_write_respects_structure(path in gen_path(), body in gen_any_utf8(), stylesheet in option::of(gen_any_utf8())) {
+            let temp = TempDir::new().expect("tempdir");
+            let _guard = CwdGuard::enter(temp.path()).expect("change cwd");
+
+            let doc = HtmlDocument {
+                path: path.clone(),
+                body: Html::from(body.clone()),
+                stylesheet: stylesheet.clone(),
+            };
+            doc.write().expect("write should succeed");
+
+            let output_path = expected_output_path(temp.path(), &path);
+            prop_assert_eq!(output_path.extension().and_then(|ext| ext.to_str()), Some("html"));
+
+            let html = fs::read_to_string(&output_path).expect("read written file");
+            prop_assert_eq!(html.lines().next(), Some("<!DOCTYPE html>"));
+            prop_assert_eq!(html.match_indices("<html").count(), 1);
+            prop_assert_eq!(html.match_indices("<head>").count(), 1);
+            prop_assert_eq!(html.match_indices("<body>").count(), 1);
+            prop_assert_eq!(html.match_indices(KATEX_STYLESHEET_LINK).count(), 1);
+
+            let body_start = html.find("<body>\n").expect("body start") + "<body>\n".len();
+            let body_end = html.rfind("\n</body>").expect("body end");
+            let body_slice = &html[body_start..body_end];
+            prop_assert_eq!(body_slice, body.as_str());
+            if !body.is_empty() {
+                prop_assert_eq!(html.match_indices(&body).count(), 1);
+            }
+
+            let title = extract_title(&html).expect("title present");
+            let expected_title = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(escape_html)
+                .unwrap_or_else(|| "Document".to_string());
+            prop_assert_eq!(title, expected_title);
+            prop_assert!(!title.contains('<'));
+            prop_assert!(!title.contains('>'));
+            prop_assert!(!title.contains('"'));
+            prop_assert!(!title.contains('\''));
+
+            match stylesheet {
+                Some(css) => {
+                    let expected_block = format!("  <style>\n{css}\n  </style>\n");
+                    prop_assert_eq!(html.match_indices("<style>").count(), 1);
+                    prop_assert_eq!(html.match_indices("</style>").count(), 1);
+                    prop_assert_eq!(html.match_indices(&expected_block).count(), 1);
+                }
+                None => {
+                    prop_assert_eq!(html.match_indices("<style>").count(), 0);
+                }
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(file_config())]
+        #[cfg_attr(
+            not(feature = "security_properties"),
+            ignore = "known failing security property: output confinement (release blocker)"
+        )]
+        #[test]
+        fn html_write_is_confined_to_out(path in gen_path(), body in gen_any_utf8()) {
+            let temp = TempDir::new().expect("tempdir");
+            let _guard = CwdGuard::enter(temp.path()).expect("change cwd");
+
+            let doc = HtmlDocument {
+                path: path.clone(),
+                body: Html::from(body),
+                stylesheet: None,
+            };
+            doc.write().expect("write should succeed");
+
+            let output_path = expected_output_path(temp.path(), &path);
+            let canonical_written = output_path.canonicalize().expect("canonicalise written file");
+            let canonical_out = temp.path().join(super::OUTPUT_ROOT).canonicalize().expect("canonicalise out dir");
+            prop_assert!(canonical_written.starts_with(&canonical_out));
+        }
+    }
+}

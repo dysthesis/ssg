@@ -64,3 +64,125 @@ fn fallback_plain(source: &str, language: Option<&str>) -> String {
     out.push_str("</code></pre>\n");
     out
 }
+
+#[cfg(test)]
+mod tests {
+    #![allow(dead_code)]
+    use super::*;
+    use crate::test_support::{
+        DEFAULT_CASES, decode_five_entities, gen_any_utf8, gen_language_token_adversarial,
+        strip_tags_lossy,
+    };
+    use proptest::option;
+    use proptest::prelude::*;
+
+    fn config() -> ProptestConfig {
+        ProptestConfig {
+            cases: DEFAULT_CASES,
+            ..ProptestConfig::default()
+        }
+    }
+
+    fn normalise_newlines_allow_single_trailing(s: &str) -> String {
+        let mut norm = s.replace("\r\n", "\n");
+        let had_trailing = norm.ends_with('\n');
+        while norm.ends_with('\n') {
+            norm.pop();
+        }
+        if had_trailing {
+            norm.push('\n');
+        }
+        norm
+    }
+
+    fn recover_text(html: &str) -> String {
+        let stripped = strip_tags_lossy(html);
+        let mut decoded = decode_five_entities(&stripped);
+        if decoded.starts_with('\n') {
+            decoded.remove(0);
+        }
+        if decoded.ends_with('\n') {
+            decoded.pop();
+        }
+        decoded
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[test]
+        fn fallback_plain_structure_and_content(source in gen_any_utf8(), language in option::of(gen_language_token_adversarial())) {
+            let rendered = fallback_plain(&source, language.as_deref());
+            prop_assert!(rendered.starts_with("<pre><code"));
+            prop_assert!(rendered.ends_with("</code></pre>\n"));
+
+            let escaped = escape_html(&source);
+            if escaped.is_empty() {
+                let end = rendered.rfind("</code>").expect("code close");
+                let start = rendered[..end].rfind('>').expect("code open end") + 1;
+                prop_assert_eq!(&rendered[start..end], "");
+            } else {
+                prop_assert_eq!(rendered.match_indices(&escaped).count(), 1);
+            }
+
+            prop_assert!(rendered.ends_with('\n'));
+            if rendered.len() > 1 {
+                prop_assert!(!rendered[..rendered.len()-1].ends_with('\n'));
+            }
+        }
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[cfg_attr(
+            not(feature = "security_properties"),
+            ignore = "known failing security property: language attribute injection (release blocker)"
+        )]
+        #[test]
+        fn fallback_plain_rejects_language_injection(source in gen_any_utf8(), lang in gen_language_token_adversarial().prop_filter("non-empty language", |s| !s.is_empty())) {
+            let rendered = fallback_plain(&source, Some(lang.as_str()));
+            let prefix = "<pre><code class=\"language-";
+            prop_assert!(rendered.starts_with(prefix));
+            let remainder = &rendered[prefix.len()..];
+            let quote_pos = remainder.find('"').ok_or_else(|| TestCaseError::fail("no closing quote in class attribute"))?;
+            let language_slice = &remainder[..quote_pos];
+            prop_assert!(language_slice.bytes().all(|b| matches!(b, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'-' | b'_')));
+            let tag_close = rendered.find('>').ok_or_else(|| TestCaseError::fail("no closing angle bracket"))?;
+            prop_assert_eq!(&rendered[..=tag_close], format!("{prefix}{language_slice}\">"));
+        }
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[test]
+        fn render_codeblock_textual_recovery(source in gen_any_utf8(), language in option::of(gen_language_token_adversarial())) {
+            let highlighter = SyntectHighlighter::default();
+            let rendered = highlighter.render_codeblock(&source, language.as_deref()).to_string();
+            let recovered = recover_text(&rendered);
+            let expected = normalise_newlines_allow_single_trailing(&source);
+            let recovered_norm = normalise_newlines_allow_single_trailing(&recovered);
+            prop_assert_eq!(recovered_norm, expected);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[test]
+        fn render_codeblock_language_independence(source in gen_any_utf8(), lang1 in option::of(gen_language_token_adversarial()), lang2 in option::of(gen_language_token_adversarial())) {
+            let highlighter = SyntectHighlighter::default();
+            let rendered1 = highlighter.render_codeblock(&source, lang1.as_deref()).to_string();
+            let rendered2 = highlighter.render_codeblock(&source, lang2.as_deref()).to_string();
+            let recovered1 = normalise_newlines_allow_single_trailing(&recover_text(&rendered1));
+            let recovered2 = normalise_newlines_allow_single_trailing(&recover_text(&rendered2));
+            prop_assert_eq!(recovered1, recovered2);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(config())]
+        #[test]
+        fn render_codeblock_never_panics(source in gen_any_utf8(), language in option::of(gen_language_token_adversarial())) {
+            let highlighter = SyntectHighlighter::default();
+            let _ = highlighter.render_codeblock(&source, language.as_deref());
+        }
+    }
+}

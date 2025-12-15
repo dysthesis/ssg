@@ -585,6 +585,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "no-panic"
+version = "0.1.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "113d1abd5bb3dc25a75d9b3a973f40e31eb03e0bae23c172b32cca4bcb9cfad2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
 name = "num-conv"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -997,10 +1008,12 @@ dependencies = [
  "criterion",
  "itertools 0.14.0",
  "katex",
+ "no-panic",
  "proptest",
  "proptest-derive",
  "pulldown-cmark",
  "syntect",
+ "tempfile",
  "tracing",
  "walkdir",
 ]
