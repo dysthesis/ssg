@@ -5,7 +5,7 @@ use std::{env::current_dir, fs::read_to_string};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
 
-#[no_panic::no_panic]
+#[cfg_attr(not(test), no_panic::no_panic)]
 fn main() -> Result<()> {
     // Install error logging
     color_eyre::install()?;
