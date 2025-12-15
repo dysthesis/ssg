@@ -57,6 +57,8 @@
         ./nix/shell
         ./nix/pkgs
         ./nix/checks
+        ./nix/format
+        inputs.treefmt-nix.flakeModule
       ];
 
       systems = [
