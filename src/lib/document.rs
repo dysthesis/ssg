@@ -211,6 +211,16 @@ pub struct HtmlDocument {
 }
 
 impl HtmlDocument {
+    /// Construct a new HtmlDocument directly (useful for benchmarking)
+    #[cfg(feature = "bench")]
+    pub fn new(path: PathBuf, body: Html, stylesheet: Option<String>) -> Self {
+        HtmlDocument {
+            path,
+            body,
+            stylesheet,
+        }
+    }
+
     /// Get a reference to the HTML body
     pub fn body(&self) -> &Html {
         &self.body

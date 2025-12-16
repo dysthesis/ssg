@@ -63,6 +63,10 @@ harness = false
 name = "cold_start"
 harness = false
 
+[[bench]]
+name = "io"
+harness = false
+
 [profile.release]
 strip = true
 lto = true
