@@ -6,8 +6,15 @@ use std::{env::current_dir, fs::read_to_string};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
 
-#[cfg_attr(not(test), no_panic::no_panic)]
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg_attr(all(not(feature = "dhat-heap"), not(test)), no_panic::no_panic)]
 fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     // Install error logging
     color_eyre::install()?;
 
