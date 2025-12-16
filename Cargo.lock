@@ -1071,6 +1071,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "pulldown-cmark",
+ "rayon",
  "serde",
  "serde_json",
  "sha2",

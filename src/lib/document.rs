@@ -53,6 +53,7 @@ pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> PathBuf {
 
 /// Process multiple documents in-memory without filesystem operations.
 /// This is useful for benchmarking CPU-only performance.
+#[cfg(feature = "bench")]
 pub fn process_documents_in_memory(
     documents: &[(PathBuf, String)],
     stylesheet: Option<String>,
