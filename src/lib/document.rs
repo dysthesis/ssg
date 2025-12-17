@@ -122,6 +122,11 @@ impl Html {
     pub fn into_string(self) -> String {
         self.0
     }
+
+    /// Convert into a `CowStr` without additional allocation
+    pub fn into_cow_str(self) -> pulldown_cmark::CowStr<'static> {
+        pulldown_cmark::CowStr::from(self.0)
+    }
 }
 
 /// A raw Markdown document with an associated stylesheet to style the resulting
