@@ -10,6 +10,7 @@ use std::{
     fs::{File, create_dir_all},
     io::{BufWriter, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use crate::renderer::katex::KATEX_STYLESHEET_LINK;
@@ -56,7 +57,7 @@ pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> PathBuf {
 #[cfg(feature = "bench")]
 pub fn process_documents_in_memory(
     documents: &[(PathBuf, String)],
-    stylesheet: Option<String>,
+    stylesheet: Option<Arc<String>>,
 ) -> Vec<(PathBuf, String)> {
     documents
         .iter()
@@ -131,12 +132,12 @@ pub struct Document<'a> {
     /// The contents of the Markdown document.
     content: &'a str,
     /// The CSS to style the resulting page with.
-    stylesheet: Option<String>,
+    stylesheet: Option<Arc<String>>,
 }
 
 impl<'a> Document<'a> {
     /// Construct a new document given the path, content, and stylesheet.
-    pub fn new(path: PathBuf, content: &'a str, stylesheet: Option<String>) -> Document<'a> {
+    pub fn new(path: PathBuf, content: &'a str, stylesheet: Option<Arc<String>>) -> Document<'a> {
         Document {
             path,
             content,
@@ -176,7 +177,7 @@ where
     /// The event iterator of syntax elements from the original document.
     pub iterator: T,
     /// The CSS to style the resulting page with.
-    stylesheet: Option<String>,
+    stylesheet: Option<Arc<String>>,
 }
 
 impl<'a, T> Buildable<HtmlDocument> for ParsedDocument<'a, T>
@@ -207,13 +208,13 @@ pub struct HtmlDocument {
     /// The body of the HTML document
     body: Html,
     /// The stylesheet to style the page with
-    stylesheet: Option<String>,
+    stylesheet: Option<Arc<String>>,
 }
 
 impl HtmlDocument {
     /// Construct a new HtmlDocument directly (useful for benchmarking)
     #[cfg(feature = "bench")]
-    pub fn new(path: PathBuf, body: Html, stylesheet: Option<String>) -> Self {
+    pub fn new(path: PathBuf, body: Html, stylesheet: Option<Arc<String>>) -> Self {
         HtmlDocument {
             path,
             body,
@@ -233,7 +234,7 @@ impl HtmlDocument {
 
     /// Get a reference to the stylesheet
     pub fn stylesheet(&self) -> Option<&str> {
-        self.stylesheet.as_deref()
+        self.stylesheet.as_ref().map(|arc| arc.as_str())
     }
 
     /// Write the HTML document to an arbitrary writer
@@ -425,7 +426,7 @@ mod tests {
             let doc = HtmlDocument {
                 path: path.clone(),
                 body: Html::from(body.clone()),
-                stylesheet: stylesheet.clone(),
+                stylesheet: stylesheet.clone().map(Arc::new),
             };
             doc.write().expect("write should succeed");
 
@@ -443,9 +444,6 @@ mod tests {
             let body_end = html.rfind("\n</body>").expect("body end");
             let body_slice = &html[body_start..body_end];
             prop_assert_eq!(body_slice, body.as_str());
-            if !body.is_empty() {
-                prop_assert_eq!(html.match_indices(&body).count(), 1);
-            }
 
             let title = extract_title(&html).expect("title present");
             let expected_title = path

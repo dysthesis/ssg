@@ -2,7 +2,7 @@ use color_eyre::{Section, eyre::Result};
 use itertools::{Either, Itertools};
 use libssg::document::{Buildable, Document, Parseable, Writeable};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{env::current_dir, fs::read_to_string};
+use std::{env::current_dir, fs::read_to_string, sync::Arc};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
 
@@ -27,7 +27,7 @@ fn main() -> Result<()> {
         let path = input_dir.join("style.css");
         if path.is_file() {
             match read_to_string(&path) {
-                Ok(content) => Some(content),
+                Ok(content) => Some(Arc::new(content)),
                 Err(error) => {
                     error!("Failed to read stylesheet {path:?}: {error}");
                     None
