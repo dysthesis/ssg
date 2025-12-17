@@ -11,7 +11,7 @@ use criterion::{
 };
 use itertools::Either;
 use libssg::document::{Buildable, Document, Html, HtmlDocument, Parseable, compute_output_path};
-use libssg::renderer::escape_html;
+use libssg::highlighter::escape_html;
 use rayon::ThreadPoolBuilder;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::hint::black_box;

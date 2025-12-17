@@ -13,7 +13,8 @@ mod tests {
     use super::*;
     use crate::{
         document::Html,
-        renderer::{escape_html, CodeblockHighlighter, MathRenderer},
+        highlighter::{escape_html, CodeblockHighlighter},
+        math::MathRenderer,
         test_support::{gen_any_utf8, gen_events_well_formed_codeblock, DEFAULT_CASES},
     };
     use code_block::ToCodeBlockTransformer;

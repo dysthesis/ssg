@@ -11,8 +11,11 @@ use criterion::{
     measurement::WallTime,
 };
 use libssg::document::{Document, Html, Parseable};
-use libssg::renderer::{CodeblockHighlighter, MathRenderer, Renderer, escape_html};
-use pulldown_cmark::Event;
+use libssg::highlighter::{CodeblockHighlighter, escape_html};
+use libssg::math::MathRenderer;
+use libssg::transformer::code_block::ToCodeBlockTransformer;
+use libssg::transformer::math::ToMathTransformer;
+use pulldown_cmark::{Event, html};
 use std::hint::black_box;
 use std::path::PathBuf;
 use util::load_corpus;
@@ -104,8 +107,9 @@ fn render_translation_minimal_overhead(c: &mut Criterion) {
     let code_dense_64k = load_corpus("code_dense/64k_40blocks.md");
     let math_dense_64k = load_corpus("math_dense/64k_valid.md");
 
-    // Create renderer with minimal stubs to isolate pure translation overhead
-    let renderer = Renderer::new(MinimalStubHighlighter, MinimalStubMathRenderer);
+    // Create highlighter and math renderer with minimal stubs to isolate pure translation overhead
+    let highlighter = MinimalStubHighlighter;
+    let math_renderer = MinimalStubMathRenderer;
 
     // Pre-parse events for code_dense
     let doc = Document::new(PathBuf::from("test.md"), code_dense_64k.as_str(), None);
@@ -121,8 +125,14 @@ fn render_translation_minimal_overhead(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
-                    black_box(html);
+                    let transformed = events
+                        .into_iter()
+                        .highlight_code(&highlighter)
+                        .render_math(&math_renderer);
+                    let mut output = String::new();
+                    html::push_html(&mut output, black_box(transformed));
+                    let html_result = Html::from(output);
+                    black_box(html_result);
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -143,8 +153,14 @@ fn render_translation_minimal_overhead(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
-                    black_box(html);
+                    let transformed = events
+                        .into_iter()
+                        .highlight_code(&highlighter)
+                        .render_math(&math_renderer);
+                    let mut output = String::new();
+                    html::push_html(&mut output, black_box(transformed));
+                    let html_result = Html::from(output);
+                    black_box(html_result);
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -162,8 +178,9 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
     let code_dense_64k = load_corpus("code_dense/64k_40blocks.md");
     let math_dense_64k = load_corpus("math_dense/64k_valid.md");
 
-    // Create renderer with stubs that include escaping (comparable to fallback)
-    let renderer = Renderer::new(StubHighlighter, StubMathRenderer);
+    // Create highlighter and math renderer with stubs that include escaping (comparable to fallback)
+    let highlighter = StubHighlighter;
+    let math_renderer = StubMathRenderer;
 
     // Pre-parse events for code_dense
     let doc = Document::new(PathBuf::from("test.md"), code_dense_64k.as_str(), None);
@@ -179,8 +196,14 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
-                    black_box(html);
+                    let transformed = events
+                        .into_iter()
+                        .highlight_code(&highlighter)
+                        .render_math(&math_renderer);
+                    let mut output = String::new();
+                    html::push_html(&mut output, black_box(transformed));
+                    let html_result = Html::from(output);
+                    black_box(html_result);
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -201,8 +224,14 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
-                    black_box(html);
+                    let transformed = events
+                        .into_iter()
+                        .highlight_code(&highlighter)
+                        .render_math(&math_renderer);
+                    let mut output = String::new();
+                    html::push_html(&mut output, black_box(transformed));
+                    let html_result = Html::from(output);
+                    black_box(html_result);
                 },
                 criterion::BatchSize::SmallInput,
             );
@@ -213,7 +242,7 @@ fn render_translation_with_stub_highlighter_and_stub_math(c: &mut Criterion) {
 }
 
 fn render_with_syntect_warm(c: &mut Criterion) {
-    use libssg::renderer::syntect::SyntectHighlighter;
+    use libssg::highlighter::syntect::SyntectHighlighter;
 
     let mut group = c.benchmark_group("render_with_syntect_warm");
     configure_renderer_group(&mut group);
@@ -287,7 +316,7 @@ fn render_with_syntect_warm(c: &mut Criterion) {
 }
 
 fn render_with_katex_warm_success_and_fallback(c: &mut Criterion) {
-    use libssg::renderer::katex::KatexRenderer;
+    use libssg::math::katex::KatexRenderer;
 
     // Success cases
     {

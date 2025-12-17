@@ -11,7 +11,8 @@ use criterion::{
     BenchmarkGroup, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main,
     measurement::WallTime,
 };
-use libssg::renderer::{escape_html, katex::fallback_plain_math, syntect::fallback_plain};
+use libssg::highlighter::{escape_html, syntect::fallback_plain};
+use libssg::math::katex::fallback_plain_math;
 use std::hint::black_box;
 use util::{load_corpus, load_snippet};
 

@@ -1,6 +1,6 @@
 use pulldown_cmark::{CodeBlockKind, Event, Tag, TagEnd};
 
-use crate::renderer::CodeblockHighlighter;
+use crate::highlighter::CodeblockHighlighter;
 use crate::transformer::Transformer;
 
 pub enum CodeBlockState<'a> {
@@ -131,7 +131,7 @@ mod tests {
     use super::*;
     use crate::{
         document::Html,
-        renderer::{escape_html, CodeblockHighlighter},
+        highlighter::{escape_html, CodeblockHighlighter},
         test_support::{
             gen_any_utf8, gen_events_well_formed_codeblock, gen_language_token_adversarial,
             DEFAULT_CASES,

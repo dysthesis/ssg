@@ -1,6 +1,6 @@
 use pulldown_cmark::Event;
 
-use crate::renderer::MathRenderer;
+use crate::math::MathRenderer;
 use crate::transformer::Transformer;
 
 /// An adapter over pulldown_cmark parser in order to render math expressions
@@ -66,7 +66,7 @@ mod tests {
     use super::*;
     use crate::{
         document::Html,
-        renderer::{escape_html, MathRenderer},
+        math::{escape_html, MathRenderer},
         test_support::{gen_any_utf8, gen_display_mode, DEFAULT_CASES},
     };
     use proptest::{collection, prelude::*};

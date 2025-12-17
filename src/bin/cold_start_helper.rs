@@ -3,9 +3,8 @@
 //! This binary is spawned in a fresh process to measure cold-start performance.
 //! It performs exactly one operation and exits.
 
-use libssg::renderer::katex::KatexRenderer;
-use libssg::renderer::syntect::SyntectHighlighter;
-use libssg::renderer::{CodeblockHighlighter, MathRenderer};
+use libssg::highlighter::{CodeblockHighlighter, syntect::SyntectHighlighter};
+use libssg::math::{MathRenderer, katex::KatexRenderer};
 use std::env;
 
 fn main() {

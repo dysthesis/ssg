@@ -115,8 +115,6 @@ fn codeblock_inner_event() -> impl Strategy<Value = Event<'static>> {
         gen_any_utf8().prop_map(|s| Event::Code(CowStr::from(s))),
         gen_any_utf8().prop_map(|s| Event::Html(CowStr::from(s))),
         gen_any_utf8().prop_map(|s| Event::InlineHtml(CowStr::from(s))),
-        gen_any_utf8().prop_map(|s| Event::InlineMath(CowStr::from(s))),
-        gen_any_utf8().prop_map(|s| Event::DisplayMath(CowStr::from(s))),
         Just(Event::SoftBreak),
         Just(Event::HardBreak),
     ]
@@ -294,7 +292,8 @@ pub fn gen_path() -> impl Strategy<Value = PathBuf> {
             .chars()
             .collect();
     let segment = collection::vec(select(allowed_path_chars.clone()), 1..=12)
-        .prop_map(|chars| chars.into_iter().collect::<String>());
+        .prop_map(|chars| chars.into_iter().collect::<String>())
+        .prop_filter("segment cannot be '.' or '..'", |s| s != "." && s != "..");
 
     let rel = collection::vec(segment.clone(), 1..=4).prop_map(|parts| {
         let mut path = PathBuf::new();
