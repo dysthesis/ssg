@@ -2,12 +2,19 @@ use color_eyre::{Section, eyre::Result};
 use itertools::{Either, Itertools};
 use libssg::document::{Buildable, Document, Parseable, Writeable};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-use std::{env::current_dir, fs::read_to_string};
+use std::{env::current_dir, fs::read_to_string, sync::Arc};
 use tracing::{error, info};
 use walkdir::{DirEntry, WalkDir};
 
-#[cfg_attr(not(test), no_panic::no_panic)]
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+#[cfg_attr(all(not(feature = "dhat-heap"), not(test)), no_panic::no_panic)]
 fn main() -> Result<()> {
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     // Install error logging
     color_eyre::install()?;
 
@@ -20,7 +27,7 @@ fn main() -> Result<()> {
         let path = input_dir.join("style.css");
         if path.is_file() {
             match read_to_string(&path) {
-                Ok(content) => Some(content),
+                Ok(content) => Some(Arc::new(content)),
                 Err(error) => {
                     error!("Failed to read stylesheet {path:?}: {error}");
                     None

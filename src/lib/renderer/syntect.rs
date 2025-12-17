@@ -116,13 +116,9 @@ mod tests {
             prop_assert!(rendered.ends_with("</code></pre>\n"));
 
             let escaped = escape_html(&source);
-            if escaped.is_empty() {
-                let end = rendered.rfind("</code>").expect("code close");
-                let start = rendered[..end].rfind('>').expect("code open end") + 1;
-                prop_assert_eq!(&rendered[start..end], "");
-            } else {
-                prop_assert_eq!(rendered.match_indices(&escaped).count(), 1);
-            }
+            let end = rendered.rfind("</code>").expect("code close");
+            let start = rendered[..end].rfind('>').expect("code open end") + 1;
+            prop_assert_eq!(&rendered[start..end], escaped.as_str());
 
             prop_assert!(rendered.ends_with('\n'));
             if rendered.len() > 1 {

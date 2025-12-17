@@ -13,6 +13,7 @@ use criterion::{
 use libssg::document::{Buildable, Document, Parseable, compute_output_path};
 use std::hint::black_box;
 use std::path::PathBuf;
+use std::sync::Arc;
 use util::{load_corpus, load_snippet};
 
 /// Configure an HTML write benchmark group
@@ -31,16 +32,16 @@ fn html_serialisation_to_memory(c: &mut Criterion) {
     configure_html_write_group(&mut group);
 
     // Load stylesheets
-    let no_stylesheet: Option<String> = None;
-    let small_stylesheet = Some(load_snippet("style_small.css"));
-    let large_stylesheet = Some(load_snippet("style_large.css"));
+    let no_stylesheet: Option<Arc<String>> = None;
+    let small_stylesheet = Some(Arc::new(load_snippet("style_small.css")));
+    let large_stylesheet = Some(Arc::new(load_snippet("style_large.css")));
 
     // Load and pre-render documents
     let plain_64k = load_corpus("plain/64k.md");
     let plain_1m = load_corpus("plain/1m.md");
 
     // Helper to render and get HTML doc
-    let make_html_doc = |corpus: &util::CorpusFile, stylesheet: Option<String>| {
+    let make_html_doc = |corpus: &util::CorpusFile, stylesheet: Option<Arc<String>>| {
         let doc = Document::new(PathBuf::from("test.md"), corpus.as_str(), stylesheet);
         let parsed = doc.parse();
         parsed.build()

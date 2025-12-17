@@ -13,9 +13,10 @@ walkdir = { version = "2.5.0", default-features = false }
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 no-panic = { version = "0.1.35", default-features = false }
 rayon = { version = "1.11.0", default-features = false }
+dhat = { version = "0.3.3", optional = true }
+criterion = { version = "0.8.0", features = ["html_reports"], optional = true }
 
 [dev-dependencies]
-criterion = { version = "0.8.0", features = ["html_reports"] }
 proptest = "1.9.0"
 proptest-derive = "0.7.0"
 tempfile = "3.13.0"
@@ -74,6 +75,6 @@ codegen-units = 1
 panic = "abort"
 
 [features]
-dhat-heap = []    
-dhat-ad-hoc = []  
-bench = []
+dhat-heap = ["dep:dhat"]    
+dhat-ad-hoc = ["dep:dhat"]  
+bench = ["dep:criterion"]
