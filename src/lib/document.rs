@@ -29,6 +29,12 @@ const PARSE_OPTIONS: [Options; 5] = [
 
 const OUTPUT_ROOT: &str = "out";
 
+pub fn output_root_path() -> PathBuf {
+    std::env::var("SSG_OUTPUT_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(OUTPUT_ROOT))
+}
+
 fn normalise_relative_path(path: &Path) -> std::io::Result<PathBuf> {
     let mut normalised = PathBuf::new();
     for component in path.components() {
@@ -81,7 +87,8 @@ pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> std::io::Re
 
     let safe_relative = normalise_relative_path(&relative_path)?;
 
-    let mut output_path = Path::new(OUTPUT_ROOT).join(safe_relative);
+    let output_root = output_root_path();
+    let mut output_path = output_root.join(safe_relative);
     output_path.set_extension("html");
     Ok(output_path)
 }

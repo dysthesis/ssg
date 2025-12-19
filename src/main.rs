@@ -22,7 +22,12 @@ fn main() -> Result<()> {
     let input_dir =
         current_dir().with_note(|| "While getting current working directory for the input.")?;
 
-    let output_dir = input_dir.join("out");
+    let output_root = libssg::document::output_root_path();
+    let output_dir = if output_root.is_absolute() {
+        output_root.clone()
+    } else {
+        input_dir.join(&output_root)
+    };
 
     let stylesheet = {
         let path = input_dir.join("style.css");
@@ -47,8 +52,16 @@ fn main() -> Result<()> {
     );
 
     info!("Enumerating directory entries...");
-    let (dir_entries, errors): (Vec<DirEntry>, Vec<walkdir::Error>) = WalkDir::new(input_dir)
+    let (dir_entries, errors): (Vec<DirEntry>, Vec<walkdir::Error>) = WalkDir::new(&input_dir)
         .into_iter()
+        .filter_entry(|entry| {
+            let name = entry.file_name();
+            if name == "target" || name == ".git" {
+                return false;
+            }
+            // Skip output directory and its descendants to avoid reprocessing generated files.
+            !entry.path().starts_with(&output_dir)
+        })
         .partition_map(|r| match r {
             Ok(v) => Either::Left(v),
             Err(e) => Either::Right(e),
