@@ -51,12 +51,27 @@ fn theme() -> &'static syntect::highlighting::Theme {
         .expect("syntect default themes should not be empty")
 }
 
+fn sanitise_language_token(token: &str) -> Option<String> {
+    // Allow only a conservative subset suitable for HTML class names.
+    if token.is_empty() {
+        return None;
+    }
+    if token
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn fallback_plain(source: &str, language: Option<&str>) -> String {
     let mut out = String::with_capacity(source.len() + 32);
     out.push_str("<pre><code");
-    if let Some(lang) = language {
+    if let Some(lang) = language.and_then(sanitise_language_token) {
         out.push_str(" class=\"language-");
-        out.push_str(lang);
+        out.push_str(&lang);
         out.push('"');
     }
     out.push('>');
@@ -160,5 +175,27 @@ mod tests {
             let highlighter = SyntectHighlighter::default();
             let _ = highlighter.render_codeblock(&source, language.as_deref());
         }
+    }
+
+    #[test]
+    fn fallback_plain_rejects_malicious_language_token() {
+        let source = "fn main() {}";
+        let bad_lang = "\"><script>alert(1)</script>";
+
+        let rendered = fallback_plain(source, Some(bad_lang));
+
+        assert!(!rendered.contains("language-"));
+        assert!(!rendered.contains("<script"));
+        assert!(rendered.starts_with("<pre><code"));
+    }
+
+    #[test]
+    fn fallback_plain_accepts_simple_language_token() {
+        let source = "fn main() {}";
+        let lang = "rust-1_72";
+
+        let rendered = fallback_plain(source, Some(lang));
+
+        assert!(rendered.contains("class=\"language-rust-1_72\""));
     }
 }
