@@ -218,7 +218,7 @@ fn materialise_site(
 fn generate_html_bytes(md_path: &Path, md_content: &str) -> Vec<u8> {
     let body = Html::from(format!("<pre>{}</pre>\n", escape_html(md_content)));
 
-    let html_doc = HtmlDocument::new(md_path.to_path_buf(), body, None);
+    let html_doc = HtmlDocument::new(md_path.to_path_buf(), body, None, false);
 
     let mut bytes = Vec::new();
     html_doc

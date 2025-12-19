@@ -255,6 +255,10 @@ where
                 .collect();
         }
 
+        let math_required = events.iter().any(|event| {
+            matches!(event, Event::InlineMath(_) | Event::DisplayMath(_))
+        });
+
         let highlighter = SyntectHighlighter::default();
         let math_renderer = KatexRenderer::new();
 
@@ -274,6 +278,7 @@ where
             path,
             body: content,
             stylesheet,
+            math_required,
         }
     }
 }
@@ -286,16 +291,24 @@ pub struct HtmlDocument {
     body: Html,
     /// The stylesheet to style the page with
     stylesheet: Option<Arc<String>>,
+    /// Whether KaTeX assets are required
+    math_required: bool,
 }
 
 impl HtmlDocument {
     /// Construct a new HtmlDocument directly (useful for benchmarking)
     #[cfg(feature = "bench")]
-    pub fn new(path: PathBuf, body: Html, stylesheet: Option<Arc<String>>) -> Self {
+    pub fn new(
+        path: PathBuf,
+        body: Html,
+        stylesheet: Option<Arc<String>>,
+        math_required: bool,
+    ) -> Self {
         HtmlDocument {
             path,
             body,
             stylesheet,
+            math_required,
         }
     }
 
@@ -314,6 +327,10 @@ impl HtmlDocument {
         self.stylesheet.as_ref().map(|arc| arc.as_str())
     }
 
+    pub fn math_required(&self) -> bool {
+        self.math_required
+    }
+
     /// Write the HTML document to an arbitrary writer
     pub fn write_to<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         let title = self
@@ -328,11 +345,20 @@ impl HtmlDocument {
             None => String::new(),
         };
 
+        let katex_block = if self.math_required {
+            let tag = std::env::var("SSG_KATEX_STYLESHEET")
+                .map(|override_href| format!(r#"<link rel="stylesheet" href="{override_href}">"#))
+                .unwrap_or_else(|_| KATEX_STYLESHEET_LINK.to_string());
+            format!("  {tag}\n")
+        } else {
+            String::new()
+        };
+
         write!(
             writer,
-            "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{title}</title>\n  {katex}\n{stylesheet}</head>\n<body>\n{body}\n</body>\n</html>\n",
+            "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"utf-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n  <title>{title}</title>\n{katex}{stylesheet}</head>\n<body>\n{body}\n</body>\n</html>\n",
             title = title,
-            katex = KATEX_STYLESHEET_LINK,
+            katex = katex_block,
             stylesheet = stylesheet_block,
             body = self.body,
         )?;
@@ -483,6 +509,7 @@ mod tests {
                 path: path.clone(),
                 body: Html::from(body.clone()),
                 stylesheet: stylesheet.clone().map(Arc::new),
+                math_required: false,
             };
             doc.write().expect("write should succeed");
 
@@ -494,7 +521,7 @@ mod tests {
             prop_assert_eq!(html.match_indices("<html").count(), 1);
             prop_assert_eq!(html.match_indices("<head>").count(), 1);
             prop_assert_eq!(html.match_indices("<body>").count(), 1);
-            prop_assert_eq!(html.match_indices(KATEX_STYLESHEET_LINK).count(), 1);
+            prop_assert_eq!(html.match_indices(KATEX_STYLESHEET_LINK).count(), 0);
 
             let body_start = html.find("<body>\n").expect("body start") + "<body>\n".len();
             let body_end = html.rfind("\n</body>").expect("body end");
@@ -547,5 +574,23 @@ mod tests {
 
         assert!(body.contains("&lt;div"));
         assert!(!body.contains("<div>pwn</div>"));
+    }
+
+    #[test]
+    fn katex_stylesheet_emitted_only_for_math() {
+        let without_math = Document::new(PathBuf::from("plain.md"), "hello", None)
+            .parse()
+            .build();
+        let mut buf = Vec::new();
+        without_math.write_to(&mut buf).unwrap();
+        let html = String::from_utf8(buf).unwrap();
+        assert_eq!(html.matches(KATEX_STYLESHEET_LINK).count(), 0);
+
+        let with_math =
+            Document::new(PathBuf::from("math.md"), "inline $a+b$", None).parse().build();
+        let mut buf_math = Vec::new();
+        with_math.write_to(&mut buf_math).unwrap();
+        let html_math = String::from_utf8(buf_math).unwrap();
+        assert_eq!(html_math.matches(KATEX_STYLESHEET_LINK).count(), 1);
     }
 }
