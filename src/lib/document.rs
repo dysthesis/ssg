@@ -3,7 +3,7 @@
 //! this module instead parses it using pulldown_cmark, and passes it to a
 //! `Renderer` to render the resulting `Event<'_>` to HTML.
 
-use pulldown_cmark::{Event, Options, Parser};
+use pulldown_cmark::{Event, Options, Parser, html};
 use std::{
     env::current_dir,
     fmt::Display,
@@ -13,8 +13,10 @@ use std::{
     sync::Arc,
 };
 
-use crate::renderer::katex::KATEX_STYLESHEET_LINK;
-use crate::renderer::{Renderer, escape_html};
+use crate::highlighter::{escape_html, syntect::SyntectHighlighter};
+use crate::math::katex::{KATEX_STYLESHEET_LINK, KatexRenderer};
+use crate::transformer::code_block::ToCodeBlockTransformer;
+use crate::transformer::math::ToMathTransformer;
 
 /// Which features to support when parsing the Markdown file.
 const PARSE_OPTIONS: [Options; 5] = [
@@ -122,6 +124,11 @@ impl Html {
     pub fn into_string(self) -> String {
         self.0
     }
+
+    /// Convert into a `CowStr` without additional allocation
+    pub fn into_cow_str(self) -> pulldown_cmark::CowStr<'static> {
+        pulldown_cmark::CowStr::from(self.0)
+    }
 }
 
 /// A raw Markdown document with an associated stylesheet to style the resulting
@@ -186,10 +193,21 @@ where
 {
     /// Consume the event iterator into an HTML body.
     fn build(self) -> HtmlDocument {
-        // Construct a default renderer...
-        let renderer = Renderer::default();
-        // ...and consume the associated event iterator
-        let content = renderer.render(self.iterator);
+        // Collect events to break lifetime dependencies
+        let events: Vec<Event<'a>> = self.iterator.map(|event| event.into_static()).collect();
+
+        let highlighter = SyntectHighlighter::default();
+        let math_renderer = KatexRenderer::new();
+
+        let transformed = events
+            .into_iter()
+            .highlight_code(&highlighter)
+            .render_math(&math_renderer);
+
+        // Convert transformed events to HTML
+        let mut html_output = String::new();
+        html::push_html(&mut html_output, transformed);
+        let content = Html::from(html_output);
 
         let path = self.path;
         let stylesheet = self.stylesheet;
@@ -284,7 +302,7 @@ impl Writeable for HtmlDocument {
 mod tests {
     #![allow(dead_code)]
     use super::*;
-    use crate::renderer::escape_html;
+    use crate::highlighter::escape_html;
     use crate::test_support::{DEFAULT_CASES, FILE_CASES, gen_any_utf8, gen_path};
     use proptest::prelude::*;
     use proptest::{collection, option};

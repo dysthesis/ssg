@@ -10,6 +10,7 @@ use walkdir::{DirEntry, WalkDir};
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
+// In general, resulting binary should not panic!
 #[cfg_attr(all(not(feature = "dhat-heap"), not(test)), no_panic::no_panic)]
 fn main() -> Result<()> {
     #[cfg(feature = "dhat-heap")]

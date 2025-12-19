@@ -9,7 +9,7 @@ use tracing::warn;
 
 use crate::{
     document::Html,
-    renderer::{CodeblockHighlighter, escape_html},
+    highlighter::{CodeblockHighlighter, escape_html},
 };
 
 #[derive(Default)]

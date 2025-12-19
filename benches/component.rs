@@ -12,8 +12,11 @@ use criterion::{
 };
 use libssg::document::Html;
 use libssg::document::{Document, Parseable};
-use libssg::renderer::{CodeblockHighlighter, MathRenderer, Renderer};
-use pulldown_cmark::Event;
+use libssg::highlighter::CodeblockHighlighter;
+use libssg::math::MathRenderer;
+use libssg::transformer::code_block::ToCodeBlockTransformer;
+use libssg::transformer::math::ToMathTransformer;
+use pulldown_cmark::{Event, html};
 use std::hint::black_box;
 use std::path::PathBuf;
 use util::load_corpus;
@@ -125,8 +128,9 @@ fn render_push_html_no_specials(c: &mut Criterion) {
         ("1m", load_corpus("plain/1m.md")),
     ];
 
-    // Create renderer once outside the timed loop
-    let renderer = Renderer::new(NoOpHighlighter, NoOpMathRenderer);
+    // Create highlighter and math renderer once outside the timed loop
+    let highlighter = NoOpHighlighter;
+    let math_renderer = NoOpMathRenderer;
 
     for (size, corpus) in inputs.iter() {
         // Pre-parse the events
@@ -139,8 +143,15 @@ fn render_push_html_no_specials(c: &mut Criterion) {
             b.iter_batched(
                 || events.clone(),
                 |events| {
-                    let html = renderer.render(black_box(events));
-                    black_box(html);
+                    let transformed = events
+                        .into_iter()
+                        .highlight_code(&highlighter)
+                        .render_math(&math_renderer);
+
+                    let mut output = String::new();
+                    html::push_html(&mut output, black_box(transformed));
+                    let html_result = Html::from(output);
+                    black_box(html_result);
                 },
                 criterion::BatchSize::SmallInput,
             );

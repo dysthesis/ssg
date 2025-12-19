@@ -3,7 +3,7 @@ use tracing::warn;
 
 use crate::{
     document::Html,
-    renderer::{MathRenderer, escape_html},
+    math::{MathRenderer, escape_html},
 };
 
 /// Renders LaTeX to KaTeX HTML + MathML without requiring client-side JS.
