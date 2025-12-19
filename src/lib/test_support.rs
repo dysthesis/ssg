@@ -8,9 +8,9 @@ use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
 
 pub const MAX_DEFAULT_BYTES: usize = 8_192;
 pub const MAX_LARGE_BYTES: usize = 1_048_576;
-pub const DEFAULT_CASES: u32 = 10_000;
-pub const FILE_CASES: u32 = 2_000;
-pub const LARGE_CASES: u32 = 200;
+pub const DEFAULT_CASES: u32 = 512;
+pub const FILE_CASES: u32 = 128;
+pub const LARGE_CASES: u32 = 32;
 
 fn chars_with_byte_limit(
     max_bytes: usize,
