@@ -3,7 +3,7 @@
 //! this module instead parses it using pulldown_cmark, and passes it to a
 //! `Renderer` to render the resulting `Event<'_>` to HTML.
 
-use pulldown_cmark::{Event, Options, Parser, html};
+use pulldown_cmark::{CowStr, Event, Options, Parser, html};
 use std::{
     env::current_dir,
     fmt::Display,
@@ -33,6 +33,13 @@ pub fn output_root_path() -> PathBuf {
     std::env::var("SSG_OUTPUT_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from(OUTPUT_ROOT))
+}
+
+fn raw_html_allowed() -> bool {
+    matches!(
+        std::env::var("SSG_ALLOW_RAW_HTML"),
+        Ok(val) if val == "1" || val.eq_ignore_ascii_case("true")
+    )
 }
 
 fn normalise_relative_path(path: &Path) -> std::io::Result<PathBuf> {
@@ -233,7 +240,20 @@ where
     /// Consume the event iterator into an HTML body.
     fn build(self) -> HtmlDocument {
         // Collect events to break lifetime dependencies
-        let events: Vec<Event<'a>> = self.iterator.map(|event| event.into_static()).collect();
+        let allow_raw_html = raw_html_allowed();
+        let mut events: Vec<Event<'static>> =
+            self.iterator.map(|event| event.into_static()).collect();
+
+        if !allow_raw_html {
+            events = events
+                .into_iter()
+                .map(|event| match event {
+                    Event::Html(html) => Event::Text(CowStr::from(html)),
+                    Event::InlineHtml(html) => Event::Text(CowStr::from(html)),
+                    other => other,
+                })
+                .collect();
+        }
 
         let highlighter = SyntectHighlighter::default();
         let math_renderer = KatexRenderer::new();
@@ -513,5 +533,19 @@ mod tests {
         let bad = Path::new("../escape.md");
         let result = compute_output_path(bad, cwd);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn raw_html_is_escaped_by_default() {
+        // Environment mutation is unsafe on some platforms; keep scoped to this test.
+        unsafe { std::env::remove_var("SSG_ALLOW_RAW_HTML") };
+        let md = "<div>pwn</div>";
+
+        let doc = Document::new(PathBuf::from("note.md"), md, None);
+        let html = doc.parse().build();
+        let body = html.body().as_str();
+
+        assert!(body.contains("&lt;div"));
+        assert!(!body.contains("<div>pwn</div>"));
     }
 }
