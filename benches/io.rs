@@ -241,7 +241,7 @@ fn prepare_write_jobs(root: &Path, md_paths: &[PathBuf], md_content: &str) -> Ve
     md_paths
         .iter()
         .map(|rel_md_path| {
-            let rel_out = compute_output_path(rel_md_path, working_dir);
+            let rel_out = compute_output_path(rel_md_path, working_dir).expect("output path");
             let output_path = root.join(&rel_out);
             let html_bytes = generate_html_bytes(rel_md_path, md_content);
 
@@ -715,8 +715,11 @@ fn io_pipeline_plain_read_build_write(c: &mut Criterion) {
                                                 let html_doc = parsed.build();
 
                                                 // Compute output path
-                                                let rel_out =
-                                                    compute_output_path(rel_path, working_dir);
+                                                let rel_out = compute_output_path(
+                                                    rel_path,
+                                                    working_dir,
+                                                )
+                                                .expect("output path");
                                                 let output_path = out_root.join(&rel_out);
 
                                                 // Create parent directories
@@ -749,7 +752,8 @@ fn io_pipeline_plain_read_build_write(c: &mut Criterion) {
                                         let html_doc = parsed.build();
 
                                         // Compute output path
-                                        let rel_out = compute_output_path(rel_path, working_dir);
+                                        let rel_out = compute_output_path(rel_path, working_dir)
+                                            .expect("output path");
                                         let output_path = out_root.join(&rel_out);
 
                                         // Create parent directories

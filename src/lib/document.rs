@@ -9,7 +9,7 @@ use std::{
     fmt::Display,
     fs::{File, create_dir_all},
     io::{BufWriter, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::Arc,
 };
 
@@ -29,9 +29,34 @@ const PARSE_OPTIONS: [Options; 5] = [
 
 const OUTPUT_ROOT: &str = "out";
 
+fn normalise_relative_path(path: &Path) -> std::io::Result<PathBuf> {
+    let mut normalised = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !normalised.pop() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "path attempts to escape output root",
+                    ));
+                }
+            }
+            Component::Normal(part) => normalised.push(part),
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "absolute components not permitted in relative path",
+                ))
+            }
+        }
+    }
+    Ok(normalised)
+}
+
 /// Compute the output path for a given input path relative to a working directory
-/// without touching the filesystem.
-pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> PathBuf {
+/// without touching the filesystem, rejecting traversal outside the output root.
+pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> std::io::Result<PathBuf> {
     let relative_path = if input_path.is_absolute() {
         input_path
             .strip_prefix(working_dir)
@@ -44,14 +69,21 @@ pub fn compute_output_path(input_path: &Path, working_dir: &Path) -> PathBuf {
                     .and_then(|root| input_path.strip_prefix(root).ok())
                     .map(PathBuf::from)
             })
-            .unwrap_or_else(|| input_path.to_path_buf())
+            .unwrap_or_else(|| {
+                input_path
+                    .strip_prefix(Path::new("/"))
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|_| input_path.to_path_buf())
+            })
     } else {
         input_path.to_path_buf()
     };
 
-    let mut output_path = Path::new(OUTPUT_ROOT).join(relative_path);
+    let safe_relative = normalise_relative_path(&relative_path)?;
+
+    let mut output_path = Path::new(OUTPUT_ROOT).join(safe_relative);
     output_path.set_extension("html");
-    output_path
+    Ok(output_path)
 }
 
 /// Process multiple documents in-memory without filesystem operations.
@@ -286,7 +318,7 @@ impl Writeable for HtmlDocument {
     /// Construct a full HTML document and write it to `./out/{self.path}`.
     fn write(self) -> std::io::Result<()> {
         let cwd = current_dir()?;
-        let output_path = compute_output_path(&self.path, &cwd);
+        let output_path = compute_output_path(&self.path, &cwd)?;
 
         if let Some(parent) = output_path.parent() {
             create_dir_all(parent)?;
@@ -344,27 +376,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = set_current_dir(&self.original);
         }
-    }
-
-    fn expected_output_path(cwd: &Path, path: &Path) -> PathBuf {
-        let relative_path = if path.is_absolute() {
-            path.strip_prefix(cwd)
-                .ok()
-                .map(PathBuf::from)
-                .or_else(|| {
-                    path.ancestors()
-                        .last()
-                        .and_then(|root| path.strip_prefix(root).ok())
-                        .map(PathBuf::from)
-                })
-                .unwrap_or_else(|| path.to_path_buf())
-        } else {
-            path.to_path_buf()
-        };
-
-        let mut output_path = Path::new(super::OUTPUT_ROOT).join(relative_path);
-        output_path.set_extension("html");
-        output_path
     }
 
     fn extract_title(html: &str) -> Option<&str> {
@@ -448,7 +459,7 @@ mod tests {
             };
             doc.write().expect("write should succeed");
 
-            let output_path = expected_output_path(temp.path(), &path);
+            let output_path = compute_output_path(&path, temp.path()).expect("output path");
             prop_assert_eq!(output_path.extension().and_then(|ext| ext.to_str()), Some("html"));
 
             let html = fs::read_to_string(&output_path).expect("read written file");
@@ -487,5 +498,13 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn compute_output_path_rejects_traversal_outside_output_root() {
+        let cwd = Path::new("/workspace");
+        let bad = Path::new("../escape.md");
+        let result = compute_output_path(bad, cwd);
+        assert!(result.is_err());
     }
 }
