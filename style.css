@@ -1,746 +1,526 @@
-@charset "UTF-8";
-@import url('https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap');
+@import url("https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,200..900;1,7..72,200..900&display=swap");
 
-/* Tufte CSS styles */
-html {
-    font-size: 15px;
+:root {
+  --font-serif: Literata, Georgia, serif;
+  --font-sans: "Gill Sans", "Gill Sans MT", Calibri, sans-serif;
+  --font-mono: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+
+  --bg: #000;
+  --fg: #fff;
+  --rule: rgba(255, 255, 255, 0.25);
+  --pre-bg: #0f0f0f;
+  --pre-border: rgba(255, 255, 255, 0.12);
+
+  --max-width: 1400px;
+  --main-col: 55%;
+  --list-col: 50%;
+  --list-pad: 5%;
+
+  --margin-col-width: 40%;
+  --margin-col-shift: -45%;
+
+  --bp: 760px;
 }
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fff;
+    --fg: #111;
+    --rule: rgba(0, 0, 0, 0.2);
+    --pre-bg: #f6f6f2;
+    --pre-border: rgba(0, 0, 0, 0.08);
+  }
+}
+
+html { font-size: 15px; }
 
 body {
-    width: 87.5%;
-    margin-left: auto;
-    margin-right: auto;
-    padding-left: 12.5%;
-    font-family: Literata, Georgia, serif;
-    background-color: #000000;
-    color: #ffffff;
-    max-width: 1400px;
-    counter-reset: sidenote-counter;
+  width: 87.5%;
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding-left: 12.5%;
+
+  font-family: var(--font-serif);
+  background: var(--bg);
+  color: var(--fg);
+
+  counter-reset: sidenote-counter;
 }
 
-/* Adds dark mode */
-@media (prefers-color-scheme: dark) {
-    body {
-        background-color: #000000;
-        color: #ffffff;
-    }
-}
-
-h1 {
-    font-weight: 400;
-    margin-top: 4rem;
-    margin-bottom: 1.5rem;
-    font-size: 3.2rem;
-    line-height: 1;
-}
-
-h2 {
-    font-style: italic;
-    font-weight: 400;
-    margin-top: 2.1rem;
-    margin-bottom: 1.4rem;
-    font-size: 2.2rem;
-    line-height: 1;
-}
-
-h3 {
-    font-style: italic;
-    font-weight: 400;
-    font-size: 1.7rem;
-    margin-top: 2rem;
-    margin-bottom: 1.4rem;
-    line-height: 1;
-}
-
-hr {
-    display: block;
-    height: 1px;
-    width: 55%;
-    border: 0;
-    border-top: 1px solid #ccc;
-    margin: 1em 0;
-    padding: 0;
-}
-
-p.subtitle {
-    font-style: italic;
-    margin-top: 1rem;
-    margin-bottom: 1rem;
-    font-size: 1.8rem;
-    display: block;
-    line-height: 1;
-}
-
-.danger {
-    color: red;
-}
-
-article {
-    padding: 5rem 0rem;
-}
+article { padding: 5rem 0; }
 
 section {
-    padding-top: 1rem;
-    padding-bottom: 1rem;
+  padding: 1rem 0;
+  counter-reset: md-h1;
+  position: relative; /* needed for .toc-anchor positioning */
 }
 
-p,
-dl,
-ol,
-ul {
-    font-size: 1.4rem;
-    line-height: 2rem;
+p, dl, ol, ul {
+  font-size: 1.4rem;
+  line-height: 2rem;
 }
 
 p {
-    margin-top: 1.4rem;
-    margin-bottom: 1.4rem;
-    padding-right: 0;
-    vertical-align: baseline;
-}
-
-/* Chapter Epigraphs */
-div.epigraph {
-    margin: 5em 0;
-}
-
-div.epigraph > blockquote {
-    margin-top: 3em;
-    margin-bottom: 3em;
-}
-
-div.epigraph > blockquote,
-div.epigraph > blockquote > p {
-    font-style: italic;
-}
-
-div.epigraph > blockquote > footer {
-    font-style: normal;
-}
-
-div.epigraph > blockquote > footer > cite {
-    font-style: italic;
-}
-/* end chapter epigraphs styles */
-
-blockquote {
-    font-size: 1.4rem;
-}
-
-blockquote p {
-    width: 55%;
-    margin-right: 40px;
-}
-
-blockquote footer {
-    width: 55%;
-    font-size: 1.1rem;
-    text-align: right;
-}
-
-section > p,
-section > footer,
-section > table {
-    width: 55%;
-}
-
-/* 50 + 5 == 55, to be the same width as paragraph */
-section > dl,
-section > ol,
-section > ul {
-    width: 50%;
-    -webkit-padding-start: 5%;
-}
-
-dt:not(:first-child),
-li:not(:first-child) {
-    margin-top: 0.25rem;
-}
-
-figure {
-    padding: 0;
-    border: 0;
-    font-size: 100%;
-    font: inherit;
-    vertical-align: baseline;
-    max-width: 55%;
-    -webkit-margin-start: 0;
-    -webkit-margin-end: 0;
-    margin: 0 0 3em 0;
-}
-
-figcaption {
-    float: right;
-    clear: right;
-    margin-top: 0;
-    margin-bottom: 0;
-    font-size: 1.1rem;
-    line-height: 1.6;
-    vertical-align: baseline;
-    position: relative;
-    max-width: 40%;
-}
-
-figure.fullwidth figcaption {
-    margin-right: 24%;
+  margin: 1.4rem 0;
+  padding-right: 0;
+  vertical-align: baseline;
 }
 
 a:link,
 a:visited {
-    color: inherit;
-    text-underline-offset: 0.1em;
-    text-decoration-thickness: 0.05em;
+  color: inherit;
+  text-underline-offset: 0.1em;
+  text-decoration-thickness: 0.05em;
 }
 
-/* Sidenotes, margin notes, figures, captions */
-img {
-    max-width: 100%;
+img { max-width: 100%; }
+
+.danger { color: red; }
+
+h1 {
+  font-weight: 400;
+  margin: 4rem 0 1.5rem;
+  font-size: 3.2rem;
+  line-height: 1;
+}
+
+h2 {
+  font-style: italic;
+  font-weight: 400;
+  margin: 2.1rem 0 1.4rem;
+  font-size: 2.2rem;
+  line-height: 1;
+}
+
+h3 {
+  font-style: italic;
+  font-weight: 400;
+  margin: 2rem 0 1.4rem;
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+p.subtitle {
+  display: block;
+  font-style: italic;
+  margin: 1rem 0;
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+hr {
+  height: 1px;
+  width: var(--main-col);
+  border: 0;
+  border-top: 1px solid #ccc;
+  margin: 1em 0;
+  padding: 0;
+}
+
+section > p,
+section > footer,
+section > table,
+section > h2 {
+  width: var(--main-col);
+}
+
+section > dl,
+section > ol,
+section > ul {
+  width: var(--list-col);
+  padding-inline-start: var(--list-pad);
+  -webkit-padding-start: var(--list-pad); /* fallback for older WebKit */
+}
+
+dt:not(:first-child),
+li:not(:first-child) {
+  margin-top: 0.25rem;
+}
+
+blockquote { font-size: 1.4rem; }
+
+blockquote p {
+  width: var(--main-col);
+  margin-right: 40px;
+}
+
+blockquote footer {
+  width: var(--main-col);
+  font-size: 1.1rem;
+  text-align: right;
+}
+
+div.epigraph { margin: 5em 0; }
+
+div.epigraph > blockquote { margin: 3em 0; }
+
+div.epigraph > blockquote,
+div.epigraph > blockquote > p { font-style: italic; }
+
+div.epigraph > blockquote > footer { font-style: normal; }
+
+div.epigraph > blockquote > footer > cite { font-style: italic; }
+
+figure {
+  max-width: var(--main-col);
+  margin: 0 0 3em 0;
+}
+
+figcaption {
+  float: right;
+  clear: right;
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.6;
+  position: relative;
+  max-width: 40%;
+}
+
+figure.fullwidth figcaption { margin-right: 24%; }
+
+.fullwidth {
+  max-width: 90%;
+  clear: both;
+}
+
+div.fullwidth,
+table.fullwidth { width: 100%; }
+
+div.table-wrapper {
+  overflow-x: auto;
+  font-family: "Trebuchet MS", "Gill Sans", "Gill Sans MT", sans-serif;
 }
 
 .sidenote,
-.marginnote {
-    float: right;
-    clear: right;
-    margin-right: -60%;
-    width: 50%;
-    margin-top: 0.3rem;
-    margin-bottom: 0;
-    font-size: 1.1rem;
-    line-height: 1.3;
-    vertical-align: baseline;
-    position: relative;
+.marginnote,
+nav.toc {
+  float: right;
+  clear: right;
+  width: var(--margin-col-width);
+  margin-right: var(--margin-col-shift);
+
+  font-size: 1.1rem;
+  line-height: 1.3;
+  vertical-align: baseline;
+  position: relative;
 }
 
-.sidenote-number {
-    counter-increment: sidenote-counter;
+.sidenote-number { counter-increment: sidenote-counter; }
+
+.sidenote-number::after,
+.sidenote::before {
+  position: relative;
+  vertical-align: baseline;
+  font-size: 1rem;
+  top: -0.5rem;
 }
 
-.sidenote-number:after,
-.sidenote:before {
-    position: relative;
-    vertical-align: baseline;
+.sidenote-number::after {
+  content: counter(sidenote-counter);
+  left: 0.1rem;
 }
 
-.sidenote-number:after {
-    content: counter(sidenote-counter);
-    font-size: 1rem;
-    top: -0.5rem;
-    left: 0.1rem;
-}
-
-.sidenote:before {
-    content: counter(sidenote-counter) " ";
-    font-size: 1rem;
-    top: -0.5rem;
+.sidenote::before {
+  content: counter(sidenote-counter) " ";
 }
 
 blockquote .sidenote,
 blockquote .marginnote {
-    margin-right: -82%;
-    min-width: 59%;
-    text-align: left;
-}
-
-div.fullwidth,
-table.fullwidth {
-    width: 100%;
-}
-
-div.table-wrapper {
-    overflow-x: auto;
-    font-family: "Trebuchet MS", "Gill Sans", "Gill Sans MT", sans-serif;
-}
-
-.sans {
-    font-family: "Gill Sans", "Gill Sans MT", Calibri, sans-serif;
-    letter-spacing: .03em;
-}
-
-code, pre > code {
-    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
-    font-size: 1.0rem;
-    line-height: 1.42;
-    -webkit-text-size-adjust: 100%; /* Prevent adjustments of font size after orientation changes in iOS. See https://github.com/edwardtufte/tufte-css/issues/81#issuecomment-261953409 */
-}
-
-.sans > code {
-    font-size: 1.2rem;
-}
-
-h1 > code,
-h2 > code,
-h3 > code {
-    font-size: 0.80em;
-}
-
-.marginnote > code,
-.sidenote > code {
-    font-size: 1rem;
-}
-
-pre {
-    width: 55%;
-    margin: 1.4rem 0;
-    padding: 1rem 1.2rem;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    border-radius: 6px;
-
-    /* Light mode */
-    background-color: #f6f6f2;
-    border: 1px solid rgba(0, 0, 0, 0.08);
-}
-
-pre, pre * {
-    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
-    font-size: 0.95rem;
-    line-height: 1.42;
-}
-
-@media (prefers-color-scheme: dark) {
-    pre {
-        background-color: #0f0f0f;
-        border-color: rgba(255, 255, 255, 0.12);
-    }
-}
-
-pre > code {
-    display: block;
-    width: auto;
-    margin: 0;
-    padding: 0;
-    background: transparent;
-}
-
-@media (max-width: 760px) {
-    pre {
-        width: 100%;
-    }
-}
-
-pre.fullwidth > code {
-    width: 90%;
-}
-
-.fullwidth {
-    max-width: 90%;
-    clear:both;
-}
-
-span.newthought {
-    font-variant: small-caps;
-    font-size: 1.2em;
-}
-
-pre { background-color: #f6f6f2 !important; }
-@media (prefers-color-scheme: dark) {
-    pre { background-color: #0f0f0f !important; }
-}
-
-input.margin-toggle {
-    display: none;
-}
-
-label.sidenote-number {
-    display: inline-block;
-    max-height: 2rem; /* should be less than or equal to paragraph line-height */
-}
-
-label.margin-toggle:not(.sidenote-number) {
-    display: none;
-}
-
-.iframe-wrapper {
-    position: relative;
-    padding-bottom: 56.25%; /* 16:9 */
-    padding-top: 25px;
-    height: 0;
-}
-
-.iframe-wrapper iframe {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-}
-
-@media (max-width: 760px) {
-    body {
-        width: 84%;
-        padding-left: 8%;
-        padding-right: 8%;
-    }
-
-    hr,
-    section > p,
-    section > footer,
-    section > table {
-        width: 100%;
-    }
-
-    pre > code {
-        width: 97%;
-    }
-
-    section > dl,
-    section > ol,
-    section > ul {
-        width: 90%;
-    }
-
-    figure {
-        max-width: 90%;
-    }
-
-    figcaption,
-    figure.fullwidth figcaption {
-        margin-right: 0%;
-        max-width: none;
-    }
-
-    blockquote {
-        margin-left: 1.5em;
-        margin-right: 0em;
-    }
-
-    blockquote p,
-    blockquote footer {
-        width: 100%;
-    }
-
-    label.margin-toggle:not(.sidenote-number) {
-        display: inline;
-    }
-
-    .sidenote,
-    .marginnote {
-        display: none;
-    }
-
-    .margin-toggle:checked + .sidenote,
-    .margin-toggle:checked + .marginnote {
-        display: block;
-        float: left;
-        left: 1rem;
-        clear: both;
-        width: 95%;
-        margin: 1rem 2.5%;
-        vertical-align: baseline;
-        position: relative;
-    }
-
-    label {
-        cursor: pointer;
-    }
-
-    div.table-wrapper,
-    table {
-        width: 85%;
-    }
-
-    img {
-        width: 100%;
-    }
+  margin-right: -60%;
+  min-width: 50%;
+  text-align: left;
 }
 
 .sidenote p,
 .marginnote p {
-    margin-top: 0;
-    margin-bottom: 0.6rem;
+  margin-top: 0;
+  margin-bottom: 0.6rem;
 }
 
 .sidenote p:last-child,
-.marginnote p:last-child {
-    margin-bottom: 0;
-}
+.marginnote p:last-child { margin-bottom: 0; }
 
 .sidenote pre,
 .marginnote pre {
-    width: 100%;
-    margin: 0.6rem 0;
+  width: 100%;
+  margin: 0.6rem 0;
+}
+
+input.margin-toggle { display: none; }
+
+label.sidenote-number {
+  display: inline-block;
+  max-height: 2rem;
+}
+
+label.margin-toggle:not(.sidenote-number) { display: none; }
+
+code,
+pre > code {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.42;
+  -webkit-text-size-adjust: 100%;
+}
+
+.sans {
+  font-family: var(--font-sans);
+  letter-spacing: 0.03em;
+}
+
+.sans > code { font-size: 1.2rem; }
+
+h1 > code,
+h2 > code,
+h3 > code { font-size: 0.8em; }
+
+.marginnote > code,
+.sidenote > code { font-size: 1rem; }
+
+pre {
+  width: var(--main-col);
+  margin: 1.4rem 0;
+  padding: 1rem 1.2rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+
+  border-radius: 6px;
+  background: var(--pre-bg);
+  border: 1px solid var(--pre-border);
+
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  line-height: 1.42;
+}
+
+pre > code {
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  width: auto;
+}
+
+pre.fullwidth > code { width: 90%; }
+
+span.newthought {
+  font-variant: small-caps;
+  font-size: 1.2em;
 }
 
 p.meta {
-    font-size: 1.1rem;
-    line-height: 1.6rem;
-    opacity: 0.8;
-    margin-top: 0.6rem;
-    margin-bottom: 1.6rem;
-    width: 55%;
+  width: var(--main-col);
+  font-size: 1.1rem;
+  line-height: 1.6rem;
+  opacity: 0.8;
+  margin: 0.6rem 0 1.6rem;
 }
 
 .tag {
-    display: inline-block;
-    padding: 0.1rem 0.5rem;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    border-radius: 999px;
-    font-size: 1.0rem;
-    margin-right: 0.3rem;
-    opacity: 0.9;
+  display: inline-block;
+  padding: 0.1rem 0.5rem;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+  font-size: 1rem;
+  margin-right: 0.3rem;
+  opacity: 0.9;
 }
 
 .meta-sep {
-    padding: 0 0.35rem;
-    opacity: 0.6;
-}
-
-section {
-    counter-reset: md-h1;
+  padding: 0 0.35rem;
+  opacity: 0.6;
 }
 
 section > h2 {
-    width: 55%;
-    counter-increment: md-h1;
-    position: relative;
+  counter-increment: md-h1;
+  position: relative;
 }
 
 section > h2::before {
-    content: counter(md-h1, decimal-leading-zero) "\00a0\2014\00a0";
-    display: inline-block;
+  content: counter(md-h1, decimal-leading-zero) "\00a0\2014\00a0";
+  display: inline-block;
 
-    /* Tune these two together */
-    width: 6rem;
-    margin-left: -6rem;
+  width: 6rem;
+  margin-left: -6rem;
+  padding-right: 1rem;
 
-    padding-right: 1rem;
-    text-align: right;
+  text-align: right;
+  opacity: 0.75;
 
-    opacity: 0.75;
-    font-style: normal;
-    font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 760px) {
-    section > h2 {
-        width: 100%;
-    }
-
-    section > h2::before {
-        width: auto;
-        margin-left: 0;
-        padding-right: 0.6rem;
-        text-align: left;
-    }
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
 }
 
 nav.toc {
-    /* Reuse the same margin layout as Tufte notes */
-    float: right;
-    clear: right;
-    margin-right: -60%;
-    width: 50%;
-
-    font-size: 1.1rem;
-    line-height: 1.3;
-
-    /* Keep it visually small */
-    opacity: 0.95;
+  opacity: 0.95;
+  margin-top: 0;
+  top: 2rem;
 }
 
 nav.toc .toc-title {
-    margin: 0 0 0.6rem 0;
-    font-style: normal;
-    font-weight: 600;
+  margin: 0 0 0.6rem 0;
+  font-style: normal;
+  font-weight: 600;
 }
 
 nav.toc ol {
-    list-style: none;
-    padding-left: 0;
-    margin: 0;
+  list-style: none;
+  padding-left: 0;
+  margin: 0;
 }
 
-nav.toc li {
-    margin: 0.25rem 0;
-}
+nav.toc li { margin: 0.25rem 0; }
 
 nav.toc a {
-    text-decoration: none;
-    display: flex;
-    align-items: baseline;
-    gap: 0.6rem;
+  text-decoration: none;
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
 }
 
-nav.toc a:hover {
-    text-decoration: underline;
-}
+nav.toc a:hover { text-decoration: underline; }
 
 nav.toc .toc-num {
-    font-variant-numeric: tabular-nums;
-    opacity: 0.75;
-    min-width: 3.4rem;   /* accommodates 01.10 and similar */
-    text-align: right;
-    flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+  min-width: 3.4rem;
+  text-align: right;
+  flex: 0 0 auto;
 }
 
-nav.toc .toc-text {
-    flex: 0 1 auto;
-}
+nav.toc .toc-text { flex: 0 1 auto; }
 
 nav.toc .toc-leader {
-    flex: 1 1 auto;
-    border-bottom: 1px dotted rgba(255, 255, 255, 0.25);
-    transform: translateY(-0.25em);
+  flex: 1 1 auto;
+  border-bottom: 1px dotted var(--rule);
+  transform: translateY(-0.25em);
 }
 
-nav.toc ol.toc-sub {
-    margin: 0.35rem 0 0.25rem 1.2rem;
-}
+nav.toc ol.toc-sub { margin: 0.35rem 0 0.25rem 1.2rem; }
 
-nav.toc li.toc-l2 .toc-num {
-    min-width: 3.4rem;
-}
-
-/* Optional: prevent very long TOCs from becoming absurd */
 nav.toc {
-    max-height: 30rem;
-    overflow: auto;
-}
-
-/* Either hide, or move inline. This moves it inline. */
-@media (max-width: 760px) {
-    nav.toc {
-        float: none;
-        clear: both;
-        margin-right: 0;
-        width: 100%;
-        max-height: none;
-        overflow: visible;
-        margin-top: 1.4rem;
-        margin-bottom: 1.4rem;
-    }
-}
-
-:root {
-    --margin-col-width: 40%;
-    --margin-col-shift: -45%;
-}
-
-/* Sidenotes, margin notes, and the TOC share the same margin behaviour */
-.sidenote,
-.marginnote,
-nav.toc {
-    width: var(--margin-col-width);
-    margin-right: var(--margin-col-shift);
-}
-
-/* Keep blockquote notes consistent */
-blockquote .sidenote,
-blockquote .marginnote {
-    margin-right: -60%;
-    min-width: 50%;
-}
-
-nav.toc { 
-    margin-top: 0;
-    top: 2rem;
+  max-height: 30rem;
+  overflow: auto;
 }
 
 .toc-anchor {
-    width: 55%;
+  width: var(--main-col);
+
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+
+  padding-top: 4rem;
+  pointer-events: none;
 }
 
-/* Make the section a positioning context for the TOC anchor */
-section {
-    position: relative;
-}
+.toc-anchor > nav.toc { pointer-events: auto; }
 
-/* 
-Keep the header text out of the margin column so it cannot collide with the 
-TOC 
-*/
 section > h1,
 section > p.subtitle,
 section > p.meta {
-    width: 55%;
+  width: var(--main-col);
 }
 
-/*
-Anchor the TOC to the same vertical start as the title.
-h1 has margin-top: 4rem, so we pad the anchor by 4rem.
-*/
-.toc-anchor {
-    width: 55%;
-
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-
-    padding-top: 4rem; /* matches h1 margin-top */
-    pointer-events: none; /* do not block selection/clicks in the main column */
-}
-
-.toc-anchor > nav.toc {
-    pointer-events: auto; /* but keep the TOC clickable */
-}
-
-/* Keep it inline, and disable the absolute/sticky behaviour */
 @media (max-width: 760px) {
-    .toc-anchor {
-        position: static;
-        width: 100%;
-        padding-top: 0;
-        pointer-events: auto;
-    }
+  body {
+    width: 84%;
+    padding-left: 8%;
+    padding-right: 8%;
+  }
 
-    nav.toc {
-        position: static;
-        top: auto;
-    }
-}
+  hr,
+  section > p,
+  section > footer,
+  section > table,
+  section > h2,
+  p.meta {
+    width: 100%;
+  }
 
-/* Make the section a positioning context for the TOC anchor */
-section {
+  section > dl,
+  section > ol,
+  section > ul { width: 90%; }
+
+  pre { width: 100%; }
+
+  figure { max-width: 90%; }
+
+  figcaption,
+  figure.fullwidth figcaption {
+    margin-right: 0;
+    max-width: none;
+  }
+
+  blockquote {
+    margin-left: 1.5em;
+    margin-right: 0;
+  }
+
+  blockquote p,
+  blockquote footer { width: 100%; }
+
+  label.margin-toggle:not(.sidenote-number) { display: inline; }
+
+  .sidenote,
+  .marginnote { display: none; }
+
+  .margin-toggle:checked + .sidenote,
+  .margin-toggle:checked + .marginnote {
+    display: block;
+    float: left;
+    left: 1rem;
+    clear: both;
+    width: 95%;
+    margin: 1rem 2.5%;
     position: relative;
+  }
+
+  label { cursor: pointer; }
+
+  div.table-wrapper,
+  table { width: 85%; }
+
+  img { width: 100%; }
+
+  section > h2::before {
+    width: auto;
+    margin-left: 0;
+    padding-right: 0.6rem;
+    text-align: left;
+  }
+
+  .toc-anchor {
+    position: static;
+    width: 100%;
+    padding-top: 0;
+    pointer-events: auto;
+  }
+
+  nav.toc {
+    float: none;
+    clear: both;
+    margin-right: 0;
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    margin: 1.4rem 0;
+    position: static;
+    top: auto;
+  }
 }
 
-/* Keep the header text out of the margin column so it cannot collide with the TOC */
-section > h1,
-section > p.subtitle,
-section > p.meta {
-    width: 55%;
+.iframe-wrapper {
+  position: relative;
+  padding-bottom: 56.25%;
+  padding-top: 25px;
+  height: 0;
 }
 
-/*
-Anchor the TOC to the same vertical start as the title.
-h1 has margin-top: 4rem, so we pad the anchor by 4rem.
-*/
-.toc-anchor {
-    width: 55%;
-
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-
-    padding-top: 4rem; /* matches h1 margin-top */
-    pointer-events: none; /* do not block selection/clicks in the main column */
-}
-
-.toc-anchor > nav.toc {
-    pointer-events: auto; /* but keep the TOC clickable */
-}
-
-/* Mobile: keep it inline, and disable the absolute/sticky behaviour */
-@media (max-width: 760px) {
-    .toc-anchor {
-        position: static;
-        width: 100%;
-        padding-top: 0;
-        pointer-events: auto;
-    }
-
-    nav.toc {
-        position: static;
-        top: auto;
-    }
-}
-
-label.sidenote-number::after {
-    content: attr(data-sidenote);
-}
-
-.sidenote::before {
-    content: attr(data-sidenote) " ";
+.iframe-wrapper iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
