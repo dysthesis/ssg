@@ -71,7 +71,7 @@ impl Header {
         result
     }
 
-    pub fn generate_body_head(&self) -> String {
+    pub fn generate_body_head(&self, href_prefix: &str) -> String {
         let mut result = String::new();
 
         let title = self
@@ -85,6 +85,11 @@ impl Header {
                 )
             })
             .unwrap_or_default();
+        let index_link = format!(
+            r#"<p class="meta"><a href="{0}index.html">Index</a></p>
+"#,
+            escape_attr(href_prefix)
+        );
 
         let subtitle = self
             .subtitle
@@ -98,16 +103,16 @@ impl Header {
             })
             .unwrap_or_default();
 
-        let meta = self.render_body_meta();
-
+        let meta = self.render_body_meta(href_prefix);
         result.push_str(&title);
         result.push_str(&subtitle);
+        result.push_str(&index_link);
         result.push_str(&meta);
 
         result
     }
 
-    fn render_body_meta(&self) -> String {
+    fn render_body_meta(&self, href_prefix: &str) -> String {
         let has_any = self.ctime.is_some()
             || self.mtime.is_some()
             || self.tags.as_ref().is_some_and(|t| !t.is_empty());
@@ -135,7 +140,14 @@ impl Header {
         if let Some(tags) = self.tags.as_ref().filter(|t| !t.is_empty()) {
             let rendered_tags = tags
                 .iter()
-                .map(|t| format!(r#"<span class="tag">{}</span>"#, escape_text(t)))
+                .map(|t| {
+                    let href = format!(r#"{href_prefix}tags/{t}.html"#);
+                    format!(
+                        r#"<a class="tag" href="{}">{}</a>"#,
+                        escape_attr(&href),
+                        escape_text(t)
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join(" ");
 

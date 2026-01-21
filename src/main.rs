@@ -13,14 +13,18 @@ use ssg::{
     css::build_css,
     header::Header,
     transformer::{
-        WithTransformer, code_block::CodeHighlightTransformer, footnote::FootnoteTransformer,
-        heading::HeadingDemoterTransformer, math::MathTransformer, toc::TocTransformer,
+        WithTransformer,
+        code_block::CodeHighlightTransformer,
+        footnote::FootnoteTransformer,
+        heading::HeadingDemoterTransformer,
+        math::MathTransformer,
+        toc::{TocTransformer, escape_attr},
     },
 };
 use walkdir::{DirEntry, WalkDir};
 
 const INPUT_DIR: &str = "contents";
-const OUPTPUT_DIR: &str = "out";
+const OUPTPUT_DIR: &str = "public";
 const POSTS_DIR: &str = "posts";
 const TAGS_DIR: &str = "tags";
 
@@ -96,7 +100,7 @@ fn main() -> color_eyre::Result<()> {
 
             let header = Header::try_from(content.as_str()).unwrap_or_default();
             let head_fragment = header.to_html(&css_href);
-            let body_header = header.generate_body_head();
+            let body_header = header.generate_body_head(&prefix);
 
             let parser = Parser::new_ext(content.as_str(), options)
                 .with_transformer::<CodeHighlightTransformer<'_, _>>()
@@ -107,6 +111,13 @@ fn main() -> color_eyre::Result<()> {
 
             let mut rendered = String::new();
             pulldown_cmark::html::push_html(&mut rendered, parser);
+
+            rendered.push_str(&format!(
+                r#"
+<p class="meta"><a href="{0}index.html">Index</a></p>
+"#,
+                escape_attr(&prefix)
+            ));
 
             let title = header
                 .title()
