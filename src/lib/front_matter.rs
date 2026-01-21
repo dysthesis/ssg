@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use color_eyre::Section;
 use gray_matter::{Matter, engine::YAML};
 use serde::Deserialize;

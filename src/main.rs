@@ -8,7 +8,7 @@ use itertools::{Either, Itertools};
 use pulldown_cmark::{Options, Parser};
 use ssg::{
     front_matter::FrontMatter,
-    transformer::{WithTransformer, code_block::CodeHighlightTransformer},
+    transformer::{WithTransformer, code_block::CodeHighlightTransformer, math::MathTransformer},
 };
 use walkdir::{DirEntry, WalkDir};
 
@@ -68,7 +68,8 @@ fn main() -> color_eyre::Result<()> {
                 .map(|res| res.to_html())
                 .unwrap_or_default();
             let parser = Parser::new_ext(content.as_str(), options)
-                .with_transformer::<CodeHighlightTransformer<'_, _>>();
+                .with_transformer::<CodeHighlightTransformer<'_, _>>()
+                .with_transformer::<MathTransformer<'_, _>>();
             let mut html_output = String::new();
             pulldown_cmark::html::push_html(&mut html_output, parser);
             (path, html_output, header)
