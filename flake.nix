@@ -22,7 +22,7 @@
 
         # Common arguments can be set here to avoid repeating them later
         # NOTE: changes here will rebuild all dependency crates
-        src = craneLib.cleanCargoSource ./.;
+        src = ./.;
         commonArgs = {
           inherit src;
           strictDeps = true;
