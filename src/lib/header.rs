@@ -150,6 +150,21 @@ impl Header {
             parts.join(r#"<span class="meta-sep">·</span>"#)
         )
     }
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
+    pub fn ctime(&self) -> Option<&str> {
+        self.ctime.as_deref()
+    }
+
+    pub fn mtime(&self) -> Option<&str> {
+        self.mtime.as_deref()
+    }
+
+    pub fn tags(&self) -> &[String] {
+        self.tags.as_deref().unwrap_or(&[])
+    }
 }
 
 fn escape_text(s: &str) -> String {

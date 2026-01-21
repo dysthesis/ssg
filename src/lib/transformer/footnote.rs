@@ -1,4 +1,4 @@
-use crate::transformer::Transformer;
+use crate::transformer::{Transformer, toc::escape_attr};
 use pulldown_cmark::{CowStr, Event, Tag};
 use std::collections::HashMap;
 
@@ -69,8 +69,10 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
                     .map(|s| inlineify_footnote_html(s))
                     .unwrap_or_default();
 
+                let display = escape_attr(label.as_ref());
+
                 let html = format!(
-                    r#"<label for="{id}" class="margin-toggle sidenote-number"></label><input type="checkbox" id="{id}" class="margin-toggle"/><span class="sidenote">{def_html}</span>"#
+                    r#"<label for="{id}" class="margin-toggle sidenote-number" data-sidenote="{display}"></label><input type="checkbox" id="{id}" class="margin-toggle"/><span class="sidenote" data-sidenote="{display}">{def_html}</span>"#
                 );
 
                 out.push(Event::InlineHtml(CowStr::from(html)));

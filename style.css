@@ -689,3 +689,58 @@ h1 has margin-top: 4rem, so we pad the anchor by 4rem.
         top: auto;
     }
 }
+
+/* Make the section a positioning context for the TOC anchor */
+section {
+    position: relative;
+}
+
+/* Keep the header text out of the margin column so it cannot collide with the TOC */
+section > h1,
+section > p.subtitle,
+section > p.meta {
+    width: 55%;
+}
+
+/*
+Anchor the TOC to the same vertical start as the title.
+h1 has margin-top: 4rem, so we pad the anchor by 4rem.
+*/
+.toc-anchor {
+    width: 55%;
+
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+
+    padding-top: 4rem; /* matches h1 margin-top */
+    pointer-events: none; /* do not block selection/clicks in the main column */
+}
+
+.toc-anchor > nav.toc {
+    pointer-events: auto; /* but keep the TOC clickable */
+}
+
+/* Mobile: keep it inline, and disable the absolute/sticky behaviour */
+@media (max-width: 760px) {
+    .toc-anchor {
+        position: static;
+        width: 100%;
+        padding-top: 0;
+        pointer-events: auto;
+    }
+
+    nav.toc {
+        position: static;
+        top: auto;
+    }
+}
+
+label.sidenote-number::after {
+    content: attr(data-sidenote);
+}
+
+.sidenote::before {
+    content: attr(data-sidenote) " ";
+}

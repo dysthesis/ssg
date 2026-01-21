@@ -282,7 +282,7 @@ fn escape_text(s: &str) -> String {
     out
 }
 
-fn escape_attr(s: &str) -> String {
+pub fn escape_attr(s: &str) -> String {
     // Same escaping rules are adequate here.
     escape_text(s)
 }

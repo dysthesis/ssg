@@ -12,6 +12,7 @@ lightningcss = "1.0.0-alpha.70"
 pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html", "simd"] }
 serde = { version = "1.0.228", features = ["derive"] }
 syntect = "5.3.0"
+time = "0.3.45"
 walkdir = "2.5.0"
 
 [dev-dependencies]
