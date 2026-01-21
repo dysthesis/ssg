@@ -2,6 +2,7 @@
   perSystem = {
     pkgs,
     craneLib,
+    inputs',
     ...
   }: let
     valeConfigured = pkgs.callPackage ./vale {};
@@ -21,6 +22,7 @@
         rust-analyzer
         cargo-wizard
         bacon
+        inputs'.rustowl.packages.default
 
         # Prose
         valeConfigured
