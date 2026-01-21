@@ -29,4 +29,4 @@ This is a simple static site generator. It's meant  to
 - all contents are placed in a directory called `./contents/`, and
 - your stylesheet is a file called `./style.css`.
 
-Simply run `ssg`, and it will compile it into a page in `./site/`
+Simply run `ssg`, and it will compile it into a page in `./out/`

@@ -6,7 +6,7 @@
 //! in order to perform things such as syntax highlighting.
 use pulldown_cmark::Event;
 
-mod code_block;
+pub mod code_block;
 
 /// A transformer over events, that takes in an inner iterator and returns
 /// another iterator of events, which returns transformed events.
