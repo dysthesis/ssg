@@ -267,7 +267,7 @@ fn uniquify_slug(base: String, counts: &mut std::collections::HashMap<String, us
     }
 }
 
-fn escape_text(s: &str) -> String {
+pub fn escape_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {

@@ -25,7 +25,7 @@ impl TryFrom<&str> for Header {
 }
 
 impl Header {
-    pub fn to_html(&self) -> String {
+    pub fn to_html(&self, css_href: &str) -> String {
         let mut result = String::new();
 
         let title = self
@@ -57,10 +57,11 @@ impl Header {
         result.push_str(&title);
         result.push_str(&description);
 
-        result.push_str(
+        result.push_str(&format!(
             r#"
-<link rel="stylesheet" href="style.css">"#,
-        );
+<link rel="stylesheet" href="{}">"#,
+            escape_attr(css_href),
+        ));
 
         result.push_str(
             r#"
