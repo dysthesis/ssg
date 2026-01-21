@@ -484,3 +484,42 @@ p.meta {
     padding: 0 0.35rem;
     opacity: 0.6;
 }
+
+section {
+    counter-reset: md-h1;
+}
+
+section > h2 {
+    width: 55%;
+    counter-increment: md-h1;
+    position: relative;
+}
+
+section > h2::before {
+    content: counter(md-h1, decimal-leading-zero) "\00a0\2014\00a0";
+    display: inline-block;
+
+    /* Tune these two together */
+    width: 6rem;
+    margin-left: -6rem;
+
+    padding-right: 1rem;
+    text-align: right;
+
+    opacity: 0.75;
+    font-style: normal;
+    font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+    section > h2 {
+        width: 100%;
+    }
+
+    section > h2::before {
+        width: auto;
+        margin-left: 0;
+        padding-right: 0.6rem;
+        text-align: left;
+    }
+}

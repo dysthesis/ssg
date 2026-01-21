@@ -30,3 +30,11 @@ There exists a bunch more things, for example, another [^2]
 # This is some heading
 
 Just a bunch of things to test it out
+
+## This shouldn't add numbers
+
+alsdgklafh;
+
+# But this should!
+
+more stuff
