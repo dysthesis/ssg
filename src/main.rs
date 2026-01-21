@@ -59,6 +59,9 @@ fn main() -> color_eyre::Result<()> {
 
     println!("Rendering...");
 
+    let footer = read_to_string(current_dir.join("footer").with_extension("html"))
+        .with_note(|| "While reading HTML footer")?;
+
     source_documents
         .into_iter()
         .map(|(path, content)| {
@@ -74,9 +77,15 @@ fn main() -> color_eyre::Result<()> {
             Some((output_dir.join(rel).with_extension("html"), rendered))
         })
         .for_each(|(out_path, rendered)| {
+            let html = format!(
+                r#"
+<body>
+{rendered}
+</body>
+{footer}"#
+            );
             // TODO: Error handling
-            dbg!("Writing to {out_path}!");
-            _ = fs::write(out_path, rendered);
+            _ = fs::write(out_path, html);
         });
 
     Ok(())
