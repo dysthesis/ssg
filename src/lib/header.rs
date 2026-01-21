@@ -3,25 +3,27 @@ use gray_matter::{Matter, engine::YAML};
 use serde::Deserialize;
 
 #[derive(Deserialize, Default, Debug)]
-pub struct FrontMatter {
+pub struct Header {
     title: Option<String>,
     description: Option<String>,
+    ctime: Option<String>,
+    mtime: Option<String>,
     tags: Vec<String>,
 }
 
-impl TryFrom<&str> for FrontMatter {
+impl TryFrom<&str> for Header {
     type Error = color_eyre::Report;
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         let matter = Matter::<YAML>::new();
         matter
-            .parse::<FrontMatter>(value)
+            .parse::<Header>(value)
             .with_note(|| "While parsing frontmatter.")
-            .map(|res| res.data.unwrap_or_else(FrontMatter::default))
+            .map(|res| res.data.unwrap_or_else(Header::default))
     }
 }
 
-impl FrontMatter {
+impl Header {
     pub fn to_html(self) -> String {
         let mut result = String::new();
         let title = self
@@ -31,8 +33,7 @@ impl FrontMatter {
                     r#"
 <title>
 {title}
-</title>
-        "#
+</title>"#
                 )
             })
             .unwrap_or_default();
@@ -41,7 +42,8 @@ impl FrontMatter {
             .description
             .map(|desc| {
                 format!(
-                    r#"<meta name="description" content="{}">"#,
+                    r#"
+<meta name="description" content="{}">"#,
                     escape_attr(&desc)
                 )
             })
@@ -49,7 +51,12 @@ impl FrontMatter {
 
         result.push_str(&title);
         result.push_str(&description);
-        result.push_str(r#"<link rel="stylesheet" href="style.css"">"#);
+        result.push_str(
+            r#"
+<link rel="stylesheet" href="style.css">"#,
+        );
+        result.push_str(r#"
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.css" integrity="sha384-m7LqaUc4JRc2uA7D4zSVUs/sgkYhmOOe9+Gd8DFmmAXH8vzs15fmw05YXvpxsoQB" crossorigin="anonymous">"#);
         result
     }
 }

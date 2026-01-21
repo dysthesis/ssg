@@ -7,7 +7,8 @@ use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
 use pulldown_cmark::{Options, Parser};
 use ssg::{
-    front_matter::FrontMatter,
+    css::build_css,
+    header::Header,
     transformer::{WithTransformer, code_block::CodeHighlightTransformer, math::MathTransformer},
 };
 use walkdir::{DirEntry, WalkDir};
@@ -64,7 +65,7 @@ fn main() -> color_eyre::Result<()> {
     source_documents
         .into_iter()
         .map(|(path, content)| {
-            let header = FrontMatter::try_from(content.as_str())
+            let header = Header::try_from(content.as_str())
                 .map(|res| res.to_html())
                 .unwrap_or_default();
             let parser = Parser::new_ext(content.as_str(), options)
@@ -84,24 +85,24 @@ fn main() -> color_eyre::Result<()> {
         })
         .for_each(|(out_path, rendered, header)| {
             let html = format!(
-                r#"
-<meta charset="utf-8">
+                r#"<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<head>
-{header}
+<head>{header}
 </head>
 <body>
-{rendered}
-</body>
+{rendered}</body>
 {footer}"#
             );
             // TODO: Error handling
             _ = fs::write(out_path, html);
-            _ = fs::copy(
-                input_dir.join("style").with_extension("css"),
-                output_dir.join("style").with_extension("css"),
-            );
         });
+
+    // Minify and copy over style.css
+    let stylesheet_in_path = current_dir.join("style").with_extension("css");
+    let stylesheet_out_path = output_dir.join("style").with_extension("css");
+    let stylesheet = build_css(stylesheet_in_path.as_path())?;
+
+    fs::write(stylesheet_out_path, stylesheet)?;
 
     Ok(())
 }
