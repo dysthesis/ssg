@@ -6,7 +6,10 @@ use std::{
 use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
 use pulldown_cmark::{Options, Parser};
-use ssg::transformer::{WithTransformer, code_block::CodeHighlightTransformer};
+use ssg::{
+    front_matter::FrontMatter,
+    transformer::{WithTransformer, code_block::CodeHighlightTransformer},
+};
 use walkdir::{DirEntry, WalkDir};
 
 const INPUT_DIR: &str = "contents";
@@ -44,8 +47,6 @@ fn main() -> color_eyre::Result<()> {
         return Err(eyre!("Failed to open some files: {errors:?}"));
     }
 
-    println!("Found {source_documents:?}");
-
     // Parse all the documents. We first construct the options with which to
     // parse, i.e. the features to enable.
     let mut options = Options::empty();
@@ -57,28 +58,38 @@ fn main() -> color_eyre::Result<()> {
     options.insert(Options::ENABLE_SUPERSCRIPT);
     options.insert(Options::ENABLE_SUBSCRIPT);
 
-    println!("Rendering...");
-
     let footer = read_to_string(current_dir.join("footer").with_extension("html"))
         .with_note(|| "While reading HTML footer")?;
 
     source_documents
         .into_iter()
         .map(|(path, content)| {
+            let header = dbg!(FrontMatter::try_from(content.as_str()))
+                .map(|res| res.to_html())
+                .unwrap_or_default();
             let parser = Parser::new_ext(content.as_str(), options)
                 .with_transformer::<CodeHighlightTransformer<'_, _>>();
             let mut html_output = String::new();
             pulldown_cmark::html::push_html(&mut html_output, parser);
             println!("Rendered {html_output}");
-            (path, html_output)
+            (path, html_output, header)
         })
-        .filter_map(|(path, rendered)| {
+        .filter_map(|(path, rendered, header)| {
             let rel = path.path().strip_prefix(&input_dir).ok()?;
-            Some((output_dir.join(rel).with_extension("html"), rendered))
+            Some((
+                output_dir.join(rel).with_extension("html"),
+                rendered,
+                header,
+            ))
         })
-        .for_each(|(out_path, rendered)| {
+        .for_each(|(out_path, rendered, header)| {
             let html = format!(
                 r#"
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<head>
+{header}
+</head>
 <body>
 {rendered}
 </body>
