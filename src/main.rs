@@ -64,14 +64,13 @@ fn main() -> color_eyre::Result<()> {
     source_documents
         .into_iter()
         .map(|(path, content)| {
-            let header = dbg!(FrontMatter::try_from(content.as_str()))
+            let header = FrontMatter::try_from(content.as_str())
                 .map(|res| res.to_html())
                 .unwrap_or_default();
             let parser = Parser::new_ext(content.as_str(), options)
                 .with_transformer::<CodeHighlightTransformer<'_, _>>();
             let mut html_output = String::new();
             pulldown_cmark::html::push_html(&mut html_output, parser);
-            println!("Rendered {html_output}");
             (path, html_output, header)
         })
         .filter_map(|(path, rendered, header)| {
