@@ -97,6 +97,10 @@ fn main() -> color_eyre::Result<()> {
             );
             // TODO: Error handling
             _ = fs::write(out_path, html);
+            _ = fs::copy(
+                input_dir.join("style").with_extension("css"),
+                output_dir.join("style").with_extension("css"),
+            );
         });
 
     Ok(())

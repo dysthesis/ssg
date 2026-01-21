@@ -8,7 +8,6 @@ use serde::Deserialize;
 pub struct FrontMatter {
     title: Option<String>,
     description: Option<String>,
-    stylesheet: Option<PathBuf>,
     tags: Vec<String>,
 }
 
@@ -50,19 +49,9 @@ impl FrontMatter {
             })
             .unwrap_or_default();
 
-        let stylesheet = self
-            .stylesheet
-            .map(|path| {
-                format!(
-                    r#"<link rel="stylesheet" href="{}" />"#,
-                    escape_attr(path.as_os_str().to_str().unwrap_or_default())
-                )
-            })
-            .unwrap_or_default();
-
         result.push_str(&title);
         result.push_str(&description);
-        result.push_str(&stylesheet);
+        result.push_str(r#"<link rel="stylesheet" href="style.css"">"#);
         result
     }
 }
