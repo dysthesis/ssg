@@ -25,7 +25,7 @@ impl TryFrom<&str> for Header {
 }
 
 impl Header {
-    pub fn to_html(&self, css_href: &str) -> String {
+    pub fn to_html(&self, css_href: &str, has_math: bool, katex_href: &str) -> String {
         let mut result = String::new();
 
         let title = self
@@ -63,10 +63,12 @@ impl Header {
             escape_attr(css_href),
         ));
 
-        result.push_str(
-            r#"
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.css" integrity="sha384-m7LqaUc4JRc2uA7D4zSVUs/sgkYhmOOe9+Gd8DFmmAXH8vzs15fmw05YXvpxsoQB" crossorigin="anonymous">"#,
-        );
+        if has_math {
+            result.push_str(&format!(
+                r#"
+<link rel="stylesheet" href="{katex_href}">"#
+            ));
+        }
 
         result
     }

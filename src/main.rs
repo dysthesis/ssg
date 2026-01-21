@@ -7,7 +7,7 @@ use std::{
 
 use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
-use pulldown_cmark::{Options, Parser};
+use pulldown_cmark::{Event, Options, Parser};
 use ssg::{
     article::{Article, render_listing_page},
     css::build_css,
@@ -99,10 +99,20 @@ fn main() -> color_eyre::Result<()> {
             let css_href = format!("{prefix}style.css");
 
             let header = Header::try_from(content.as_str()).unwrap_or_default();
-            let head_fragment = header.to_html(&css_href);
             let body_header = header.generate_body_head(&prefix);
 
-            let parser = Parser::new_ext(content.as_str(), options)
+            let parser = Parser::new_ext(content.as_str(), options);
+            let events: Vec<Event<'_>> = parser.collect();
+
+            let has_math = events
+                .iter()
+                .any(|e| matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)));
+
+            let katex_href = format!("{prefix}assets/katex/katex.min.css");
+            let head_fragment = header.to_html(&css_href, has_math, &katex_href);
+
+            let transformed = events
+                .into_iter()
                 .with_transformer::<CodeHighlightTransformer<'_, _>>()
                 .with_transformer::<MathTransformer<'_, _>>()
                 .with_transformer::<FootnoteTransformer<'_>>()
@@ -110,7 +120,7 @@ fn main() -> color_eyre::Result<()> {
                 .with_transformer::<TocTransformer<'_>>();
 
             let mut rendered = String::new();
-            pulldown_cmark::html::push_html(&mut rendered, parser);
+            pulldown_cmark::html::push_html(&mut rendered, transformed);
 
             rendered.push_str(&format!(
                 r#"
