@@ -523,3 +523,169 @@ section > h2::before {
         text-align: left;
     }
 }
+
+nav.toc {
+    /* Reuse the same margin layout as Tufte notes */
+    float: right;
+    clear: right;
+    margin-right: -60%;
+    width: 50%;
+
+    font-size: 1.1rem;
+    line-height: 1.3;
+
+    /* Keep it visually small */
+    opacity: 0.95;
+}
+
+nav.toc .toc-title {
+    margin: 0 0 0.6rem 0;
+    font-style: normal;
+    font-weight: 600;
+}
+
+nav.toc ol {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+}
+
+nav.toc li {
+    margin: 0.25rem 0;
+}
+
+nav.toc a {
+    text-decoration: none;
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+}
+
+nav.toc a:hover {
+    text-decoration: underline;
+}
+
+nav.toc .toc-num {
+    font-variant-numeric: tabular-nums;
+    opacity: 0.75;
+    min-width: 3.4rem;   /* accommodates 01.10 and similar */
+    text-align: right;
+    flex: 0 0 auto;
+}
+
+nav.toc .toc-text {
+    flex: 0 1 auto;
+}
+
+nav.toc .toc-leader {
+    flex: 1 1 auto;
+    border-bottom: 1px dotted rgba(255, 255, 255, 0.25);
+    transform: translateY(-0.25em);
+}
+
+nav.toc ol.toc-sub {
+    margin: 0.35rem 0 0.25rem 1.2rem;
+}
+
+nav.toc li.toc-l2 .toc-num {
+    min-width: 3.4rem;
+}
+
+/* Optional: prevent very long TOCs from becoming absurd */
+nav.toc {
+    max-height: 30rem;
+    overflow: auto;
+}
+
+/* Either hide, or move inline. This moves it inline. */
+@media (max-width: 760px) {
+    nav.toc {
+        float: none;
+        clear: both;
+        margin-right: 0;
+        width: 100%;
+        max-height: none;
+        overflow: visible;
+        margin-top: 1.4rem;
+        margin-bottom: 1.4rem;
+    }
+}
+
+:root {
+    --margin-col-width: 40%;
+    --margin-col-shift: -45%;
+}
+
+/* Sidenotes, margin notes, and the TOC share the same margin behaviour */
+.sidenote,
+.marginnote,
+nav.toc {
+    width: var(--margin-col-width);
+    margin-right: var(--margin-col-shift);
+}
+
+/* Keep blockquote notes consistent */
+blockquote .sidenote,
+blockquote .marginnote {
+    margin-right: -60%;
+    min-width: 50%;
+}
+
+nav.toc { 
+    margin-top: 0;
+    top: 2rem;
+}
+
+.toc-anchor {
+    width: 55%;
+}
+
+/* Make the section a positioning context for the TOC anchor */
+section {
+    position: relative;
+}
+
+/* 
+Keep the header text out of the margin column so it cannot collide with the 
+TOC 
+*/
+section > h1,
+section > p.subtitle,
+section > p.meta {
+    width: 55%;
+}
+
+/*
+Anchor the TOC to the same vertical start as the title.
+h1 has margin-top: 4rem, so we pad the anchor by 4rem.
+*/
+.toc-anchor {
+    width: 55%;
+
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+
+    padding-top: 4rem; /* matches h1 margin-top */
+    pointer-events: none; /* do not block selection/clicks in the main column */
+}
+
+.toc-anchor > nav.toc {
+    pointer-events: auto; /* but keep the TOC clickable */
+}
+
+/* Keep it inline, and disable the absolute/sticky behaviour */
+@media (max-width: 760px) {
+    .toc-anchor {
+        position: static;
+        width: 100%;
+        padding-top: 0;
+        pointer-events: auto;
+    }
+
+    nav.toc {
+        position: static;
+        top: auto;
+    }
+}

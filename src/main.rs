@@ -11,7 +11,7 @@ use ssg::{
     header::Header,
     transformer::{
         WithTransformer, code_block::CodeHighlightTransformer, footnote::FootnoteTransformer,
-        heading::HeadingDemoterTransformer, math::MathTransformer,
+        heading::HeadingDemoterTransformer, math::MathTransformer, toc::TocTransformer,
     },
 };
 use walkdir::{DirEntry, WalkDir};
@@ -62,8 +62,10 @@ fn main() -> color_eyre::Result<()> {
     options.insert(Options::ENABLE_SUPERSCRIPT);
     options.insert(Options::ENABLE_SUBSCRIPT);
 
-    let footer = read_to_string(current_dir.join("footer").with_extension("html"))
-        .with_note(|| "While reading HTML footer")?;
+    let head =
+        read_to_string(current_dir.join("header").with_extension("html")).unwrap_or_default();
+    let footer =
+        read_to_string(current_dir.join("footer").with_extension("html")).unwrap_or_default();
 
     source_documents
         .into_iter()
@@ -76,7 +78,8 @@ fn main() -> color_eyre::Result<()> {
                 .with_transformer::<CodeHighlightTransformer<'_, _>>()
                 .with_transformer::<MathTransformer<'_, _>>()
                 .with_transformer::<FootnoteTransformer<'_>>()
-                .with_transformer::<HeadingDemoterTransformer<'_, _>>();
+                .with_transformer::<HeadingDemoterTransformer<'_, _>>()
+                .with_transformer::<TocTransformer<'_>>();
 
             let mut html_output = String::new();
             pulldown_cmark::html::push_html(&mut html_output, parser);
@@ -93,9 +96,14 @@ fn main() -> color_eyre::Result<()> {
         })
         .for_each(|(out_path, rendered, header, body_header)| {
             let html = format!(
-                r#"<meta charset="utf-8">
+                r#"<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<head>{header}
+{head}
+{header}
+{footer}
 </head>
 <body>
 <article>
@@ -105,7 +113,8 @@ fn main() -> color_eyre::Result<()> {
 </section>
 </article>
 </body>
-{footer}"#
+</html>
+"#
             );
             // TODO: Error handling
             _ = fs::write(out_path, html);
