@@ -1,8 +1,13 @@
 ---
 title: "This is a test document!"
 subtitle: "Or, the necessity of violence."
+ctime: "2026-01-20"
+mtime: "2026-01-21"
+tags:
+  - rust
+  - ssg
+  - notes
 ---
-
 This is a test document with some mathematics, like $x = 5y$, and
 
 $$
