@@ -1,4 +1,7 @@
-use std::sync::OnceLock;
+use std::{
+    io::{BufReader, Cursor},
+    sync::OnceLock,
+};
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
 use syntect::{
@@ -89,7 +92,7 @@ where
                                 &self.buffer,
                                 syntax_set,
                                 syntax,
-                                theme,
+                                &theme,
                             )
                             .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
 
@@ -132,12 +135,11 @@ fn theme_set() -> &'static ThemeSet {
     THEME_SET.get_or_init(ThemeSet::load_defaults)
 }
 
-fn theme() -> &'static syntect::highlighting::Theme {
-    let themes = &theme_set().themes;
-    themes
-        .get("base16-ocean.dark")
-        .or_else(|| themes.values().next())
-        .expect("syntect default themes should not be empty")
+fn theme() -> syntect::highlighting::Theme {
+    let raw_theme = include_bytes!("../../../assets/theme.tmTheme");
+    let cursor = Cursor::new(raw_theme);
+    let mut reader = BufReader::new(cursor);
+    ThemeSet::load_from_reader(&mut reader).unwrap_or_default()
 }
 
 /// Backup renderer in case syntect fails for whatever reason
