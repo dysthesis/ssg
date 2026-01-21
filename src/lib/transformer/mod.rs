@@ -7,6 +7,8 @@
 use pulldown_cmark::Event;
 
 pub mod code_block;
+pub mod footnote;
+pub mod heading;
 pub mod math;
 
 /// A transformer over events, that takes in an inner iterator and returns

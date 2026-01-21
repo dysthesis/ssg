@@ -135,7 +135,7 @@ fn theme_set() -> &'static ThemeSet {
 fn theme() -> &'static syntect::highlighting::Theme {
     let themes = &theme_set().themes;
     themes
-        .get("InspiredGitHub")
+        .get("base16-ocean.dark")
         .or_else(|| themes.values().next())
         .expect("syntect default themes should not be empty")
 }

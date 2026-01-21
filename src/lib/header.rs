@@ -5,10 +5,11 @@ use serde::Deserialize;
 #[derive(Deserialize, Default, Debug)]
 pub struct Header {
     title: Option<String>,
+    subtitle: Option<String>,
     description: Option<String>,
     ctime: Option<String>,
     mtime: Option<String>,
-    tags: Vec<String>,
+    tags: Option<Vec<String>>,
 }
 
 impl TryFrom<&str> for Header {
@@ -24,10 +25,11 @@ impl TryFrom<&str> for Header {
 }
 
 impl Header {
-    pub fn to_html(self) -> String {
+    pub fn to_html(&self) -> String {
         let mut result = String::new();
         let title = self
             .title
+            .as_ref()
             .map(|title| {
                 format!(
                     r#"
@@ -40,11 +42,12 @@ impl Header {
 
         let description = self
             .description
+            .as_ref()
             .map(|desc| {
                 format!(
                     r#"
 <meta name="description" content="{}">"#,
-                    escape_attr(&desc)
+                    escape_attr(desc)
                 )
             })
             .unwrap_or_default();
@@ -59,7 +62,36 @@ impl Header {
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.27/dist/katex.css" integrity="sha384-m7LqaUc4JRc2uA7D4zSVUs/sgkYhmOOe9+Gd8DFmmAXH8vzs15fmw05YXvpxsoQB" crossorigin="anonymous">"#);
         result
     }
+
+    pub fn generate_body_head(&self) -> String {
+        let mut result = String::new();
+        let title = self
+            .title
+            .as_ref()
+            .map(|title| {
+                format!(
+                    r#"<h1>{title}</h1>
+"#
+                )
+            })
+            .unwrap_or_default();
+        let subtitle = self
+            .subtitle
+            .as_ref()
+            .map(|sub| {
+                format!(
+                    r#"<p class="subtitle">{sub}</p>
+"#
+                )
+            })
+            .unwrap_or_default();
+        result.push_str(&title);
+        result.push_str(&subtitle);
+
+        result
+    }
 }
+
 fn escape_attr(s: &str) -> String {
     // Minimal escaping suitable for attribute values and <title>.
     // You already have an HTML escaper in the code highlighting module; this keeps main.rs independent.

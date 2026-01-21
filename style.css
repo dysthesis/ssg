@@ -12,8 +12,8 @@ body {
     margin-right: auto;
     padding-left: 12.5%;
     font-family: Literata, Georgia, serif;
-    background-color: #fffff8;
-    color: #111;
+    background-color: #000000;
+    color: #ffffff;
     max-width: 1400px;
     counter-reset: sidenote-counter;
 }
@@ -21,8 +21,8 @@ body {
 /* Adds dark mode */
 @media (prefers-color-scheme: dark) {
     body {
-        background-color: #151515;
-        color: #ddd;
+        background-color: #000000;
+        color: #ffffff;
     }
 }
 
@@ -69,10 +69,6 @@ p.subtitle {
     font-size: 1.8rem;
     display: block;
     line-height: 1;
-}
-
-.numeral {
-    font-family: et-book-roman-old-style;
 }
 
 .danger {
@@ -221,7 +217,6 @@ img {
 
 .sidenote-number:after,
 .sidenote:before {
-    font-family: et-book-roman-old-style;
     position: relative;
     vertical-align: baseline;
 }
@@ -283,12 +278,44 @@ h3 > code {
     font-size: 1rem;
 }
 
-pre > code {
-    font-size: 0.9rem;
-    width: 52.5%;
-    margin-left: 2.5%;
+pre {
+    width: 55%;
+    margin: 1.4rem 0;
+    padding: 1rem 1.2rem;
     overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border-radius: 6px;
+
+    /* Light mode */
+    background-color: #f6f6f2;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+pre, pre * {
+    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.95rem;
+    line-height: 1.42;
+}
+
+@media (prefers-color-scheme: dark) {
+    pre {
+        background-color: #0f0f0f;
+        border-color: rgba(255, 255, 255, 0.12);
+    }
+}
+
+pre > code {
     display: block;
+    width: auto;
+    margin: 0;
+    padding: 0;
+    background: transparent;
+}
+
+@media (max-width: 760px) {
+    pre {
+        width: 100%;
+    }
 }
 
 pre.fullwidth > code {
@@ -303,6 +330,11 @@ pre.fullwidth > code {
 span.newthought {
     font-variant: small-caps;
     font-size: 1.2em;
+}
+
+pre { background-color: #f6f6f2 !important; }
+@media (prefers-color-scheme: dark) {
+    pre { background-color: #0f0f0f !important; }
 }
 
 input.margin-toggle {
@@ -410,4 +442,21 @@ label.margin-toggle:not(.sidenote-number) {
     img {
         width: 100%;
     }
+}
+
+.sidenote p,
+.marginnote p {
+    margin-top: 0;
+    margin-bottom: 0.6rem;
+}
+
+.sidenote p:last-child,
+.marginnote p:last-child {
+    margin-bottom: 0;
+}
+
+.sidenote pre,
+.marginnote pre {
+    width: 100%;
+    margin: 0.6rem 0;
 }

@@ -1,13 +1,8 @@
 ---
 title: "This is a test document!"
-description: "This is some description"
-stylesheet: "../style.css"
-tags:
-  - first
-  - second
+subtitle: "Or, the necessity of violence."
 ---
 
-# This is a test document
 This is a test document with some mathematics, like $x = 5y$, and
 
 $$
@@ -22,4 +17,11 @@ pub fn main() {
 }
 ```
 
+There exists a bunch more things, for example, another [^2]
+
 [^1]: Hi! This is a footnote!
+[^2]: Footnote
+
+# This is some heading
+
+Just a bunch of things to test it out

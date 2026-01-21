@@ -9,7 +9,10 @@ use pulldown_cmark::{Options, Parser};
 use ssg::{
     css::build_css,
     header::Header,
-    transformer::{WithTransformer, code_block::CodeHighlightTransformer, math::MathTransformer},
+    transformer::{
+        WithTransformer, code_block::CodeHighlightTransformer, footnote::FootnoteTransformer,
+        heading::HeadingDemoterTransformer, math::MathTransformer,
+    },
 };
 use walkdir::{DirEntry, WalkDir};
 
@@ -65,32 +68,43 @@ fn main() -> color_eyre::Result<()> {
     source_documents
         .into_iter()
         .map(|(path, content)| {
-            let header = Header::try_from(content.as_str())
-                .map(|res| res.to_html())
+            let (header, body_header) = Header::try_from(content.as_str())
+                .map(|res| (res.to_html(), res.generate_body_head()))
                 .unwrap_or_default();
+
             let parser = Parser::new_ext(content.as_str(), options)
                 .with_transformer::<CodeHighlightTransformer<'_, _>>()
-                .with_transformer::<MathTransformer<'_, _>>();
+                .with_transformer::<MathTransformer<'_, _>>()
+                .with_transformer::<FootnoteTransformer<'_>>()
+                .with_transformer::<HeadingDemoterTransformer<'_, _>>();
+
             let mut html_output = String::new();
             pulldown_cmark::html::push_html(&mut html_output, parser);
-            (path, html_output, header)
+            (path, html_output, header, body_header)
         })
-        .filter_map(|(path, rendered, header)| {
+        .filter_map(|(path, rendered, header, body_header)| {
             let rel = path.path().strip_prefix(&input_dir).ok()?;
             Some((
                 output_dir.join(rel).with_extension("html"),
                 rendered,
                 header,
+                body_header,
             ))
         })
-        .for_each(|(out_path, rendered, header)| {
+        .for_each(|(out_path, rendered, header, body_header)| {
             let html = format!(
                 r#"<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <head>{header}
 </head>
 <body>
-{rendered}</body>
+<article>
+<section>
+{body_header}
+{rendered}
+</section>
+</article>
+</body>
 {footer}"#
             );
             // TODO: Error handling
