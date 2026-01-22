@@ -72,6 +72,7 @@ fn main() -> color_eyre::Result<()> {
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_SUPERSCRIPT);
     options.insert(Options::ENABLE_SUBSCRIPT);
+    options.insert(Options::ENABLE_SMART_PUNCTUATION);
 
     let head =
         read_to_string(current_dir.join("header").with_extension("html")).unwrap_or_default();
