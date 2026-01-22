@@ -1,13 +1,15 @@
 use std::{
     collections::BTreeMap,
-    env::current_dir,
+    env::{self, current_dir},
     fs::{self, read_to_string},
     io,
     path::{Path, PathBuf},
 };
 
+use axum::Router;
 use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
+use notify::{EventKind, RecursiveMode, Watcher};
 use pulldown_cmark::{Event, Options, Parser};
 use ssg::{
     article::{Article, render_listing_page},
@@ -22,6 +24,8 @@ use ssg::{
         toc::{TocTransformer, escape_attr},
     },
 };
+use tower_http::services::ServeDir;
+use tower_livereload::LiveReloadLayer;
 use walkdir::{DirEntry, WalkDir};
 
 const INPUT_DIR: &str = "contents";
@@ -29,9 +33,76 @@ const OUPTPUT_DIR: &str = "public";
 const POSTS_DIR: &str = "posts";
 const TAGS_DIR: &str = "tags";
 
-fn main() -> color_eyre::Result<()> {
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
     color_eyre::install()?;
 
+    if env::args().any(|a| a == "serve") {
+        serve().await?;
+    } else {
+        build_site()?;
+    }
+
+    Ok(())
+}
+
+async fn serve() -> color_eyre::Result<()> {
+    // Initial build
+    println!("Building site...");
+    build_site()?;
+
+    let current_dir = current_dir().with_note(|| "While getting the current working directory")?;
+    let public_dir = current_dir.join(OUPTPUT_DIR);
+    let contents_dir = current_dir.join(INPUT_DIR);
+    let css_src = current_dir.join("style.css");
+
+    // Setup Live Reload
+    let livereload = LiveReloadLayer::new();
+    let reloader = livereload.reloader();
+
+    // Setup File Watcher
+    let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+        match res {
+            Ok(event) => {
+                // FIX: Ignore Access events (triggered when reading files) to prevent infinite loops
+                if matches!(event.kind, EventKind::Access(_)) {
+                    return;
+                }
+
+                println!("Change detected, rebuilding...");
+                // We ignore build errors during watch mode to keep the server alive
+                if let Err(e) = build_site() {
+                    eprintln!("Build failed: {}", e);
+                } else {
+                    println!("Rebuild complete.");
+                    reloader.reload();
+                }
+            }
+            Err(e) => eprintln!("Watch error: {}", e),
+        }
+    })?;
+
+    // Watch contents directory and the style.css file
+    watcher.watch(&contents_dir, RecursiveMode::Recursive)?;
+    if css_src.exists() {
+        watcher.watch(&css_src, RecursiveMode::NonRecursive)?;
+    }
+
+    // Setup Axum Router
+    // Note: Using fallback_service for Axum 0.8 compatibility
+    let app = Router::new()
+        .fallback_service(ServeDir::new(public_dir))
+        .layer(livereload);
+
+    println!("Serving on http://localhost:3000");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+
+    Ok(())
+}
+
+/// The original logic from main(), extracted into a function
+fn build_site() -> color_eyre::Result<()> {
     let current_dir = current_dir().with_note(|| "While getting the current working directory")?;
     let input_dir = current_dir.join(INPUT_DIR);
     let output_dir = current_dir.join(OUPTPUT_DIR);
@@ -63,8 +134,7 @@ fn main() -> color_eyre::Result<()> {
         return Err(eyre!("Failed to open some files: {errors:?}"));
     }
 
-    // Parse all the documents. We first construct the options with which to
-    // parse, i.e. the features to enable.
+    // Parse all the documents.
     let mut options = Options::empty();
     options.insert(Options::ENABLE_GFM);
     options.insert(Options::ENABLE_MATH);
@@ -96,7 +166,7 @@ fn main() -> color_eyre::Result<()> {
             )
         })
         .for_each(|(out_path, rendered, header_html, body_header)| {
-            // Build th eactual page
+            // Build the actual page
             let html = format!(
                 r#"<!doctype html>
 <html lang="en">
@@ -128,10 +198,12 @@ fn main() -> color_eyre::Result<()> {
 
     // Minify and copy over style.css
     let stylesheet_in_path = current_dir.join("style").with_extension("css");
-    let stylesheet_out_path = output_dir.join("style").with_extension("css");
-    let stylesheet = build_css(stylesheet_in_path.as_path())?;
-
-    fs::write(stylesheet_out_path, stylesheet)?;
+    // Ensure input stylesheet exists, otherwise skip (to avoid errors in fresh checkout)
+    if stylesheet_in_path.exists() {
+        let stylesheet_out_path = output_dir.join("style").with_extension("css");
+        let stylesheet = build_css(stylesheet_in_path.as_path())?;
+        fs::write(stylesheet_out_path, stylesheet)?;
+    }
 
     Ok(())
 }
