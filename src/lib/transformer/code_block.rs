@@ -130,11 +130,6 @@ fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
-static THEME_SET: OnceLock<ThemeSet> = OnceLock::new();
-fn theme_set() -> &'static ThemeSet {
-    THEME_SET.get_or_init(ThemeSet::load_defaults)
-}
-
 fn theme() -> syntect::highlighting::Theme {
     let raw_theme = include_bytes!("../../../assets/theme.tmTheme");
     let cursor = Cursor::new(raw_theme);

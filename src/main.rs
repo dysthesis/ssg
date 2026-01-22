@@ -2,7 +2,8 @@ use std::{
     collections::BTreeMap,
     env::current_dir,
     fs::{self, read_to_string},
-    path::PathBuf,
+    io,
+    path::{Path, PathBuf},
 };
 
 use color_eyre::{Section, eyre::eyre};
@@ -76,6 +77,7 @@ fn main() -> color_eyre::Result<()> {
 
     let head =
         read_to_string(current_dir.join("header").with_extension("html")).unwrap_or_default();
+
     let footer =
         read_to_string(current_dir.join("footer").with_extension("html")).unwrap_or_default();
 
@@ -84,69 +86,17 @@ fn main() -> color_eyre::Result<()> {
     source_documents
         .into_iter()
         .filter_map(|(entry, content)| {
-            let rel_src = entry.path().strip_prefix(&input_dir).ok()?.to_owned();
-
-            let rel_out = PathBuf::from(POSTS_DIR)
-                .join(&rel_src)
-                .with_extension("html");
-            let out_path = output_dir.join(&rel_out);
-
-            if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent).ok()?;
-            }
-
-            let href = path_to_href(&rel_out);
-            let prefix = prefix_to_root(&rel_out);
-            let css_href = format!("{prefix}style.css");
-
-            let header = Header::try_from(content.as_str()).unwrap_or_default();
-            let body_header = header.generate_body_head(&prefix);
-
-            let parser = Parser::new_ext(content.as_str(), options);
-            let events: Vec<Event<'_>> = parser.collect();
-
-            let has_math = events
-                .iter()
-                .any(|e| matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)));
-
-            let katex_href = format!("{prefix}assets/katex/katex.min.css");
-            let head_fragment = header.to_html(&css_href, has_math, &katex_href);
-
-            let transformed = events
-                .into_iter()
-                .with_transformer::<CodeHighlightTransformer<'_, _>>()
-                .with_transformer::<MathTransformer<'_, _>>()
-                .with_transformer::<FootnoteTransformer<'_>>()
-                .with_transformer::<HeadingDemoterTransformer<'_, _>>()
-                .with_transformer::<TocTransformer<'_>>();
-
-            let mut rendered = String::new();
-            pulldown_cmark::html::push_html(&mut rendered, transformed);
-
-            rendered.push_str(&format!(
-                r#"
-<p class="meta"><a href="{0}index.html">Index</a></p>
-"#,
-                escape_attr(&prefix)
-            ));
-
-            let title = header
-                .title()
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| rel_out.to_string_lossy().to_string());
-
-            if let Some(ctime) = header.ctime() {
-                articles.push(Article {
-                    title,
-                    ctime: ctime.to_owned(),
-                    href,
-                    tags: header.tags().to_vec(),
-                });
-            }
-
-            Some((out_path, rendered, head_fragment, body_header))
+            parse_item(
+                entry,
+                content,
+                &input_dir,
+                &output_dir,
+                options,
+                &mut articles,
+            )
         })
         .for_each(|(out_path, rendered, header_html, body_header)| {
+            // Build th eactual page
             let html = format!(
                 r#"<!doctype html>
 <html lang="en">
@@ -164,43 +114,17 @@ fn main() -> color_eyre::Result<()> {
 </section>
 </article>
 </body>
+{footer}
 </html>
 "#
             );
             _ = fs::write(out_path, html);
         });
 
+    // Sort by time first, then title
     articles.sort_by(|a, b| b.ctime.cmp(&a.ctime).then_with(|| a.title.cmp(&b.title)));
-    let index_rel = std::path::Path::new("index.html");
-    let index_prefix = prefix_to_root(index_rel);
-
-    let index_html = render_listing_page("Index", "Index", &articles, &head, &index_prefix);
-
-    fs::write(output_dir.join("index.html"), index_html)?;
-
-    let mut by_tag: BTreeMap<String, Vec<Article>> = BTreeMap::new();
-    for a in &articles {
-        for t in &a.tags {
-            by_tag.entry(t.clone()).or_default().push(a.clone());
-        }
-    }
-
-    let tags_dir = output_dir.join(TAGS_DIR);
-    fs::create_dir_all(&tags_dir)?;
-    for (tag, mut tagged) in by_tag {
-        let tag_rel = std::path::PathBuf::from(TAGS_DIR).join(format!("{tag}.html"));
-        let tag_prefix = prefix_to_root(&tag_rel);
-
-        let html = render_listing_page(
-            &format!("Tag: {tag}"),
-            &format!("Tag: {tag}"),
-            &tagged,
-            &head,
-            &tag_prefix,
-        );
-
-        fs::write(output_dir.join(tag_rel), html)?;
-    }
+    build_index(&output_dir, &articles, &head).with_note(|| "While building main index.")?;
+    build_tag_indices(&articles, &output_dir, &head).with_note(|| "While building tag indices")?;
 
     // Minify and copy over style.css
     let stylesheet_in_path = current_dir.join("style").with_extension("css");
@@ -211,6 +135,120 @@ fn main() -> color_eyre::Result<()> {
 
     Ok(())
 }
+
+fn parse_item(
+    entry: DirEntry,
+    content: String,
+    input_dir: &Path,
+    output_dir: &Path,
+    options: Options,
+    articles: &mut Vec<Article>,
+) -> Option<(
+    /* out path */ PathBuf,
+    /* rendered */ String,
+    /* header_html */ String,
+    /* body header */ String,
+)> {
+    let rel_src = entry.path().strip_prefix(input_dir).ok()?.to_owned();
+
+    let rel_out = PathBuf::from(POSTS_DIR)
+        .join(&rel_src)
+        .with_extension("html");
+    let out_path = output_dir.join(&rel_out);
+
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent).ok()?;
+    }
+
+    let href = path_to_href(&rel_out);
+    let prefix = prefix_to_root(&rel_out);
+    let css_href = format!("{prefix}style.css");
+
+    let header = Header::try_from(content.as_str()).unwrap_or_default();
+    let body_header = header.generate_body_head(&prefix);
+
+    let parser = Parser::new_ext(content.as_str(), options);
+    let events: Vec<Event<'_>> = parser.collect();
+
+    let has_math = events
+        .iter()
+        .any(|e| matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)));
+
+    let katex_href = format!("{prefix}assets/katex/katex.min.css");
+    let head_fragment = header.to_html(&css_href, has_math, &katex_href);
+
+    let transformed = events
+        .into_iter()
+        .with_transformer::<CodeHighlightTransformer<'_, _>>()
+        .with_transformer::<MathTransformer<'_, _>>()
+        .with_transformer::<FootnoteTransformer<'_>>()
+        .with_transformer::<HeadingDemoterTransformer<'_, _>>()
+        .with_transformer::<TocTransformer<'_>>();
+
+    let mut rendered = String::new();
+    pulldown_cmark::html::push_html(&mut rendered, transformed);
+
+    rendered.push_str(&format!(
+        r#"
+<p class="meta"><a href="{0}index.html">Index</a></p>
+"#,
+        escape_attr(&prefix)
+    ));
+
+    let title = header
+        .title()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| rel_out.to_string_lossy().to_string());
+
+    if let Some(ctime) = header.ctime() {
+        articles.push(Article {
+            title,
+            ctime: ctime.to_owned(),
+            href,
+            tags: header.tags().to_vec(),
+        });
+    }
+
+    Some((out_path, rendered, head_fragment, body_header))
+}
+
+fn build_index(output_dir: &Path, articles: &[Article], head: &str) -> io::Result<()> {
+    let index_rel = std::path::Path::new("index.html");
+    let index_prefix = prefix_to_root(index_rel);
+
+    let index_html = render_listing_page("Index", "Index", articles, head, &index_prefix);
+
+    fs::write(output_dir.join("index.html"), index_html)
+}
+
+fn build_tag_indices(articles: &[Article], output_dir: &Path, head: &str) -> io::Result<()> {
+    let mut by_tag: BTreeMap<String, Vec<Article>> = BTreeMap::new();
+    for a in articles {
+        for t in &a.tags {
+            by_tag.entry(t.clone()).or_default().push(a.clone());
+        }
+    }
+
+    let tags_dir = output_dir.join(TAGS_DIR);
+    fs::create_dir_all(&tags_dir)?;
+    for (tag, tagged) in by_tag {
+        let tag_rel = std::path::PathBuf::from(TAGS_DIR).join(format!("{tag}.html"));
+        let tag_prefix = prefix_to_root(&tag_rel);
+
+        let html = render_listing_page(
+            &format!("Tag: {tag}"),
+            &format!("Tag: {tag}"),
+            &tagged,
+            head,
+            &tag_prefix,
+        );
+
+        fs::write(output_dir.join(tag_rel), html)?;
+    }
+
+    Ok(())
+}
+
 fn prefix_to_root(rel_out: &std::path::Path) -> String {
     let depth = rel_out
         .parent()
