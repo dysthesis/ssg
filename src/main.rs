@@ -20,6 +20,7 @@ use ssg::{
         code_block::CodeHighlightTransformer,
         footnote::FootnoteTransformer,
         heading::HeadingDemoterTransformer,
+        image::ImageCaptionTransformer,
         math::MathTransformer,
         toc::{TocTransformer, escape_attr},
     },
@@ -255,7 +256,8 @@ fn parse_item(
         .with_transformer::<MathTransformer<'_, _>>()
         .with_transformer::<FootnoteTransformer<'_>>()
         .with_transformer::<HeadingDemoterTransformer<'_, _>>()
-        .with_transformer::<TocTransformer<'_>>();
+        .with_transformer::<TocTransformer<'_>>()
+        .with_transformer::<ImageCaptionTransformer<_>>();
 
     let mut rendered = String::new();
     pulldown_cmark::html::push_html(&mut rendered, transformed);

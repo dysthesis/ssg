@@ -9,6 +9,7 @@ use pulldown_cmark::Event;
 pub mod code_block;
 pub mod footnote;
 pub mod heading;
+pub mod image;
 pub mod math;
 pub mod toc;
 
