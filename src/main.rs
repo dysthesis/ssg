@@ -253,13 +253,13 @@ fn parse_item(
 
     let transformed = events
         .into_iter()
+        .with_transformer::<EpigraphTransformer<'_>>()
         .with_transformer::<CodeHighlightTransformer<'_, _>>()
         .with_transformer::<MathTransformer<'_, _>>()
         .with_transformer::<FootnoteTransformer<'_>>()
         .with_transformer::<HeadingDemoterTransformer<'_, _>>()
         .with_transformer::<TocTransformer<'_>>()
-        .with_transformer::<ImageCaptionTransformer<_>>()
-        .with_transformer::<EpigraphTransformer<'_>>();
+        .with_transformer::<ImageCaptionTransformer<_>>();
 
     let mut rendered = String::new();
     pulldown_cmark::html::push_html(&mut rendered, transformed);
