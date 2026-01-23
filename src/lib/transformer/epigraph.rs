@@ -53,9 +53,8 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
                     }
                 }
 
-                // i is now at the closing TagEnd::BlockQuote. Check if the last
-                // text node has the delimiter
-                if let Some(footer_text) = extract_and_strip_footer(&mut buffer) {
+                // Check for footer in the captured buffer
+                if let Some(footer_text) = extract_footer(&mut buffer) {
                     out.push(start_tag);
                     // Push the modified body
                     out.extend(buffer);
@@ -83,50 +82,109 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
     out
 }
 
-/// Looks at the end of the event buffer for "--".
-/// If found, modifies the buffer to remove the footer from the text event,
-/// and returns the footer string.
-fn extract_and_strip_footer<'a>(events: &mut Vec<Event<'a>>) -> Option<String> {
-    // Iterate backwards to find the last text node
-    for idx in (0..events.len()).rev() {
-        if let Event::Text(text) = &events[idx] {
-            // Check for standard dash, En-dash, or Em-dash (smart punctuation)
-            let split_pos = text
-                .rfind("--")
-                .or_else(|| text.rfind('\u{2013}'))
-                .or_else(|| text.rfind('\u{2014}'));
-
-            if let Some(pos) = split_pos {
-                let (content, footer) = text.split_at(pos);
-
-                // Clean the footer text
-                let clean_footer = footer
-                    .chars()
-                    .skip_while(|c| *c == '-' || *c == '\u{2013}' || *c == '\u{2014}')
-                    .collect::<String>()
-                    .trim()
-                    .to_string();
-
-                if clean_footer.is_empty() {
-                    continue;
-                }
-
-                // Modify the buffer. Truncate the text event
-                let content_str = content.trim_end().to_string();
-                if content_str.is_empty() {
-                    events.remove(idx);
-                } else {
-                    events[idx] = Event::Text(CowStr::from(content_str));
-                }
-
-                return Some(clean_footer);
+fn extract_footer<'a>(buffer: &mut Vec<Event<'a>>) -> Option<String> {
+    // Find the index of the last *significant* text event. We skip trailing
+    // whitespace or softbreaks to find the actual content.
+    let mut text_idx = None;
+    for (idx, event) in buffer.iter().enumerate().rev() {
+        if let Event::Text(t) = event {
+            if !t.trim().is_empty() {
+                text_idx = Some(idx);
+                break;
             }
-
-            // If the last text node doesn't have it, we stop looking.
-            return None;
         }
     }
-    None
+
+    let idx = text_idx?;
+    let text = match &buffer[idx] {
+        Event::Text(t) => t,
+        _ => return None,
+    };
+
+    // Check for delimiters in that text node. Smart punctuation might have
+    // converted "--" into En-Dash (\u{2013}) or Em-Dash (\u{2014}).
+    let split_pos = text
+        .rfind("--")
+        .or_else(|| text.rfind('\u{2013}'))
+        .or_else(|| text.rfind('\u{2014}'));
+
+    let Some(pos) = split_pos else {
+        return None;
+    };
+
+    let (content, footer_raw) = text.split_at(pos);
+
+    // Verify the footer looks like an attribution
+    let footer_clean = footer_raw
+        .chars()
+        .skip_while(|c| *c == '-' || *c == '\u{2013}' || *c == '\u{2014}')
+        .collect::<String>()
+        .trim()
+        .to_string();
+
+    if footer_clean.is_empty() {
+        return None;
+    }
+
+    // Modify the text event in the buffer
+    let remaining_content = content.trim_end().to_string();
+
+    if remaining_content.is_empty() {
+        // If the text node contained ONLY the footer, remove it entirely.
+        buffer.remove(idx);
+    } else {
+        // Otherwise, keep the content part.
+        buffer[idx] = Event::Text(CowStr::from(remaining_content));
+    }
+
+    // Cleanup: If we removed the text and left an empty paragraph wrapper,
+    // remove the wrapper too.
+    cleanup_empty_paragraph(buffer);
+
+    Some(footer_clean)
+}
+
+/// Removes a trailing empty paragraph from the buffer.
+/// E.g. turns `[..., Start(P), End(P)]` into `[...]`.
+fn cleanup_empty_paragraph(buffer: &mut Vec<Event>) {
+    // First, remove any trailing whitespace/breaks that might be sitting after
+    // the text we just removed.
+    while let Some(last) = buffer.last() {
+        match last {
+            Event::Text(t) if t.trim().is_empty() => {
+                buffer.pop();
+            }
+            Event::SoftBreak | Event::HardBreak => {
+                buffer.pop();
+            }
+            _ => break,
+        }
+    }
+
+    // Now check if the last element is End(Paragraph)
+    if let Some(Event::End(TagEnd::Paragraph)) = buffer.last() {
+        // Search backwards for the matching Start(Paragraph)
+        // If we find it without encountering any "real" content, we delete the range.
+        let mut p_start = None;
+        for i in (0..buffer.len() - 1).rev() {
+            match &buffer[i] {
+                Event::Start(Tag::Paragraph) => {
+                    p_start = Some(i);
+                    break;
+                }
+                // If we hit another End tag (nested structure) or content, stop.
+                Event::End(_) => break,
+                Event::Text(t) if !t.trim().is_empty() => break,
+                Event::Code(_) | Event::Html(_) | Event::Start(Tag::Image { .. }) => break,
+                _ => {} // Continue past whitespace, softbreaks, etc.
+            }
+        }
+
+        if let Some(start) = p_start {
+            // Remove the empty paragraph events
+            buffer.drain(start..);
+        }
+    }
 }
 
 fn escape_html(s: &str) -> String {
