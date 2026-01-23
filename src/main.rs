@@ -18,6 +18,7 @@ use ssg::{
     transformer::{
         WithTransformer,
         code_block::CodeHighlightTransformer,
+        epigraph::EpigraphTransformer,
         footnote::FootnoteTransformer,
         heading::HeadingDemoterTransformer,
         image::ImageCaptionTransformer,
@@ -257,7 +258,8 @@ fn parse_item(
         .with_transformer::<FootnoteTransformer<'_>>()
         .with_transformer::<HeadingDemoterTransformer<'_, _>>()
         .with_transformer::<TocTransformer<'_>>()
-        .with_transformer::<ImageCaptionTransformer<_>>();
+        .with_transformer::<ImageCaptionTransformer<_>>()
+        .with_transformer::<EpigraphTransformer<'_>>();
 
     let mut rendered = String::new();
     pulldown_cmark::html::push_html(&mut rendered, transformed);

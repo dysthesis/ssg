@@ -7,6 +7,7 @@
 use pulldown_cmark::Event;
 
 pub mod code_block;
+pub mod epigraph;
 pub mod footnote;
 pub mod heading;
 pub mod image;
