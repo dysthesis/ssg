@@ -29,11 +29,6 @@ where
 }
 
 /// Convert Markdown footnotes (endnotes) into Tufte-style inline sidenotes.
-///
-/// This rewrites the event stream:
-/// - Collects all footnote definitions into a map.
-/// - Replaces each footnote reference with Tufte HTML inserted inline.
-/// - Removes the original footnote-definition blocks from the output.
 pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
     let defs = collect_definitions(&events);
 
@@ -69,7 +64,7 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
                     .map(|s| inlineify_footnote_html(s))
                     .unwrap_or_default();
 
-                let display = escape_attr(label.as_ref());
+                let display = sidenote_index.to_string();
 
                 let html = format!(
                     r#"<label for="{id}" class="margin-toggle sidenote-number" data-sidenote="{display}"></label><input type="checkbox" id="{id}" class="margin-toggle"/><span class="sidenote" data-sidenote="{display}">{def_html}</span>"#
