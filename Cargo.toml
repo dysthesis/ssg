@@ -12,6 +12,7 @@ gray_matter = "0.3.2"
 itertools = { version = "0.14.0", default-features = false }
 katex = "0.4.6"
 lightningcss = "1.0.0-alpha.70"
+minify-html = { version = "0.18.1", default-features = false }
 notify = "8.2.0"
 pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html", "simd"] }
 rss = { version = "2.0.12", default-features = false }

@@ -9,6 +9,7 @@ use std::{
 use axum::Router;
 use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
+use minify_html::{Cfg, minify};
 use notify::{EventKind, RecursiveMode, Watcher};
 use pulldown_cmark::{Event, Options, Parser};
 use ssg::{
@@ -154,7 +155,7 @@ fn build_site() -> color_eyre::Result<()> {
         read_to_string(current_dir.join("footer").with_extension("html")).unwrap_or_default();
 
     let mut articles: Vec<Article> = Vec::new();
-
+    let cfg = Cfg::new();
     source_documents
         .into_iter()
         .filter_map(|(entry, content)| {
@@ -190,7 +191,7 @@ fn build_site() -> color_eyre::Result<()> {
 </html>
 "#
             );
-            _ = fs::write(out_path, html);
+            _ = fs::write(out_path, minify(html.as_bytes(), &cfg));
         });
 
     // Sort by time first, then title
@@ -295,7 +296,11 @@ fn build_index(output_dir: &Path, articles: &[Article], head: &str) -> io::Resul
 
     let index_html = render_listing_page("Index", "Index", articles, head, &index_prefix);
 
-    fs::write(output_dir.join("index.html"), index_html)
+    let cfg = Cfg::new();
+    fs::write(
+        output_dir.join("index.html"),
+        minify(index_html.as_bytes(), &cfg),
+    )
 }
 
 fn build_tag_indices(articles: &[Article], output_dir: &Path, head: &str) -> io::Result<()> {
@@ -320,7 +325,8 @@ fn build_tag_indices(articles: &[Article], output_dir: &Path, head: &str) -> io:
             &tag_prefix,
         );
 
-        fs::write(output_dir.join(tag_rel), html)?;
+        let cfg = Cfg::new();
+        fs::write(output_dir.join(tag_rel), minify(html.as_bytes(), &cfg))?;
     }
 
     Ok(())
