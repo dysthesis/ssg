@@ -64,7 +64,7 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
                     .map(|s| inlineify_footnote_html(s))
                     .unwrap_or_default();
 
-                let display = sidenote_index.to_string();
+                let display = sidenote_index;
 
                 let html = format!(
                     r#"<label for="{id}" class="margin-toggle sidenote-number" data-sidenote="{display}"></label><input type="checkbox" id="{id}" class="margin-toggle"/><span class="sidenote" data-sidenote="{display}">{def_html}</span>"#
