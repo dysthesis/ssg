@@ -58,21 +58,23 @@ async fn serve() -> color_eyre::Result<()> {
     let contents_dir = current_dir.join(INPUT_DIR);
     let css_src = current_dir.join("style.css");
 
-    // Setup Live Reload
+    // Setup live reload
     let livereload = LiveReloadLayer::new();
     let reloader = livereload.reloader();
 
-    // Setup File Watcher
+    // Setup file watcher
     let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         match res {
             Ok(event) => {
-                // FIX: Ignore Access events (triggered when reading files) to prevent infinite loops
+                // Ignore Access events (triggered when reading files) to
+                // prevent infinite loops
                 if matches!(event.kind, EventKind::Access(_)) {
                     return;
                 }
 
                 println!("Change detected, rebuilding...");
-                // We ignore build errors during watch mode to keep the server alive
+                // We ignore build errors during watch mode to keep the server
+                // alive
                 if let Err(e) = build_site() {
                     eprintln!("Build failed: {}", e);
                 } else {
@@ -90,8 +92,7 @@ async fn serve() -> color_eyre::Result<()> {
         watcher.watch(&css_src, RecursiveMode::NonRecursive)?;
     }
 
-    // Setup Axum Router
-    // Note: Using fallback_service for Axum 0.8 compatibility
+    // Setup Axum router
     let app = Router::new()
         .fallback_service(ServeDir::new(public_dir))
         .layer(livereload);
@@ -103,7 +104,6 @@ async fn serve() -> color_eyre::Result<()> {
     Ok(())
 }
 
-/// The original logic from main(), extracted into a function
 fn build_site() -> color_eyre::Result<()> {
     let current_dir = current_dir().with_note(|| "While getting the current working directory")?;
     let input_dir = current_dir.join(INPUT_DIR);
@@ -251,6 +251,7 @@ fn parse_item(
     let katex_href = format!("{prefix}assets/katex/katex.min.css");
     let head_fragment = header.to_html(&css_href, has_math, &katex_href);
 
+    // Apply transformers
     let transformed = events
         .into_iter()
         .with_transformer::<EpigraphTransformer<'_>>()

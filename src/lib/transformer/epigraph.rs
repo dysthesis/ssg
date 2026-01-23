@@ -33,6 +33,7 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
 
     while i < events.len() {
         match &events[i] {
+            // Match Start tag
             Event::Start(Tag::BlockQuote(_)) => {
                 let start_tag = events[i].clone();
                 i += 1;
@@ -53,12 +54,12 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
                     }
                 }
 
-                // Check for footer in the captured buffer
+                // i is now at the closing TagEnd::BlockQuote. Check for footer.
                 if let Some(footer_text) = extract_footer(&mut buffer) {
                     out.push(start_tag);
-                    // Push the modified body
                     out.extend(buffer);
-                    // Inject the footer element *inside* the blockquote
+
+                    // Inject <footer> inside the blockquote
                     let footer_html = format!("<footer>{}</footer>", escape_html(&footer_text));
                     out.push(Event::Html(CowStr::from(footer_html)));
 
@@ -66,7 +67,6 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
                         out.push(events[i].clone()); // Close BlockQuote
                     }
                 } else {
-                    // Not an epigraph, render normally
                     out.push(start_tag);
                     out.extend(buffer);
                     if i < events.len() {
@@ -83,15 +83,14 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
 }
 
 fn extract_footer<'a>(buffer: &mut Vec<Event<'a>>) -> Option<String> {
-    // Find the index of the last *significant* text event. We skip trailing
-    // whitespace or softbreaks to find the actual content.
+    // Find the last significant text node.
     let mut text_idx = None;
     for (idx, event) in buffer.iter().enumerate().rev() {
-        if let Event::Text(t) = event {
-            if !t.trim().is_empty() {
-                text_idx = Some(idx);
-                break;
-            }
+        if let Event::Text(t) = event
+            && !t.trim().is_empty()
+        {
+            text_idx = Some(idx);
+            break;
         }
     }
 
@@ -101,24 +100,19 @@ fn extract_footer<'a>(buffer: &mut Vec<Event<'a>>) -> Option<String> {
         _ => return None,
     };
 
-    // Check for delimiters in that text node. Smart punctuation might have
-    // converted "--" into En-Dash (\u{2013}) or Em-Dash (\u{2014}).
+    // Check for delimiters
     let split_pos = text
         .rfind("--")
         .or_else(|| text.rfind('\u{2013}'))
         .or_else(|| text.rfind('\u{2014}'));
 
-    let Some(pos) = split_pos else {
-        return None;
-    };
+    let pos = split_pos?;
 
     let (content, footer_raw) = text.split_at(pos);
 
-    // Verify the footer looks like an attribution
+    // Clean up the extracted footer
     let footer_clean = footer_raw
-        .chars()
-        .skip_while(|c| *c == '-' || *c == '\u{2013}' || *c == '\u{2014}')
-        .collect::<String>()
+        .trim_start_matches(['-', '\u{2013}', '\u{2014}'])
         .trim()
         .to_string();
 
@@ -126,29 +120,22 @@ fn extract_footer<'a>(buffer: &mut Vec<Event<'a>>) -> Option<String> {
         return None;
     }
 
-    // Modify the text event in the buffer
-    let remaining_content = content.trim_end().to_string();
-
-    if remaining_content.is_empty() {
-        // If the text node contained ONLY the footer, remove it entirely.
+    // Modify the buffer, truncate or remove the text node
+    let new_content = content.trim_end().to_string();
+    if new_content.is_empty() {
         buffer.remove(idx);
     } else {
-        // Otherwise, keep the content part.
-        buffer[idx] = Event::Text(CowStr::from(remaining_content));
+        buffer[idx] = Event::Text(CowStr::from(new_content));
     }
 
-    // Cleanup: If we removed the text and left an empty paragraph wrapper,
-    // remove the wrapper too.
+    // Cleanup empty paragraph wrapper if we emptied the text
     cleanup_empty_paragraph(buffer);
 
     Some(footer_clean)
 }
 
-/// Removes a trailing empty paragraph from the buffer.
-/// E.g. turns `[..., Start(P), End(P)]` into `[...]`.
 fn cleanup_empty_paragraph(buffer: &mut Vec<Event>) {
-    // First, remove any trailing whitespace/breaks that might be sitting after
-    // the text we just removed.
+    // Remove trailing whitespace/breaks
     while let Some(last) = buffer.last() {
         match last {
             Event::Text(t) if t.trim().is_empty() => {
@@ -161,10 +148,9 @@ fn cleanup_empty_paragraph(buffer: &mut Vec<Event>) {
         }
     }
 
-    // Now check if the last element is End(Paragraph)
+    // If the last thing is End(P), check if it matches a Start(P) with no
+    // content in between
     if let Some(Event::End(TagEnd::Paragraph)) = buffer.last() {
-        // Search backwards for the matching Start(Paragraph)
-        // If we find it without encountering any "real" content, we delete the range.
         let mut p_start = None;
         for i in (0..buffer.len() - 1).rev() {
             match &buffer[i] {
@@ -172,16 +158,20 @@ fn cleanup_empty_paragraph(buffer: &mut Vec<Event>) {
                     p_start = Some(i);
                     break;
                 }
-                // If we hit another End tag (nested structure) or content, stop.
-                Event::End(_) => break,
+                Event::End(_) => break, // Nested structure, abort
+                // Real content, abort
                 Event::Text(t) if !t.trim().is_empty() => break,
-                Event::Code(_) | Event::Html(_) | Event::Start(Tag::Image { .. }) => break,
-                _ => {} // Continue past whitespace, softbreaks, etc.
+                Event::Code(_)
+                | Event::Html(_)
+                | Event::InlineHtml(_)
+                | Event::Start(Tag::Image { .. }) => {
+                    break;
+                }
+                _ => {}
             }
         }
 
         if let Some(start) = p_start {
-            // Remove the empty paragraph events
             buffer.drain(start..);
         }
     }
