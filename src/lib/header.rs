@@ -57,18 +57,18 @@ impl Header {
         result.push_str(&title);
         result.push_str(&description);
 
-        result.push_str(&format!(
-            r#"
-<link rel="stylesheet" href="{}">"#,
-            escape_attr(css_href),
-        ));
-
         if has_math {
             result.push_str(&format!(
                 r#"
 <link rel="stylesheet" href="{katex_href}">"#
             ));
         }
+
+        result.push_str(&format!(
+            r#"
+<link rel="stylesheet" href="{}">"#,
+            escape_attr(css_href),
+        ));
 
         result
     }
