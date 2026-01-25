@@ -135,60 +135,107 @@ fn render_definition_as_inline_html<'a>(events: &[Event<'a>]) -> String {
 fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
     let mut out: Vec<Event<'a>> = Vec::with_capacity(events.len());
 
-    let mut at_start = true;
-    let mut pending_paragraph_break = false;
+    // Whether the *next* paragraph in the current container needs a separator.
+    // Index 0 is the top-level footnote definition container.
+    let mut need_par_sep_stack: Vec<bool> = vec![false];
+
+    let mut quote_depth: usize = 0;
+    let mut last_was_break: bool = false;
+
+    let push_break = |out: &mut Vec<Event<'a>>, html: &'static str, last_was_break: &mut bool| {
+        if !*last_was_break {
+            out.push(Event::InlineHtml(CowStr::from(html)));
+            *last_was_break = true;
+        }
+    };
 
     for ev in events.iter().cloned() {
         match ev {
-            // Paragraphs are block-level; drop the tags and insert breaks
-            // between them.
+            // Drop paragraph tags; insert separators between paragraphs.
             Event::Start(Tag::Paragraph) => {
-                if !at_start && (pending_paragraph_break || !out.is_empty()) {
-                    out.push(Event::InlineHtml(CowStr::from("<br><br>")));
+                if *need_par_sep_stack.last().unwrap_or(&false) {
+                    if quote_depth > 0 {
+                        push_break(&mut out, "<br>", &mut last_was_break);
+                    } else {
+                        push_break(&mut out, "<br><br>", &mut last_was_break);
+                    }
+                    if let Some(top) = need_par_sep_stack.last_mut() {
+                        *top = false;
+                    }
                 }
-                pending_paragraph_break = false;
-                at_start = false;
             }
             Event::End(TagEnd::Paragraph) => {
-                pending_paragraph_break = true;
+                if let Some(top) = need_par_sep_stack.last_mut() {
+                    *top = true;
+                }
+                last_was_break = false;
             }
 
-            // Block quotes are block-level; replace with an inline span wrapper.
+            // Replace blockquote with an inline wrapper.
             Event::Start(Tag::BlockQuote(_)) => {
-                if !at_start {
-                    out.push(Event::InlineHtml(CowStr::from("<br><br>")));
+                if !out.is_empty() {
+                    push_break(&mut out, "<br><br>", &mut last_was_break);
                 }
                 out.push(Event::InlineHtml(CowStr::from(
                     r#"<span class="sidenote-quote">"#,
                 )));
-                pending_paragraph_break = false;
-                at_start = false;
+                quote_depth += 1;
+                need_par_sep_stack.push(false);
+                last_was_break = false;
             }
             Event::End(TagEnd::BlockQuote(_)) => {
                 out.push(Event::InlineHtml(CowStr::from("</span>")));
-                pending_paragraph_break = true;
-                at_start = false;
+                quote_depth = quote_depth.saturating_sub(1);
+                need_par_sep_stack.pop();
+                if let Some(top) = need_par_sep_stack.last_mut() {
+                    *top = true;
+                }
+                last_was_break = false;
             }
 
-            // Keep line breaks as line breaks.
-            Event::SoftBreak | Event::HardBreak => {
-                out.push(Event::InlineHtml(CowStr::from("<br>")));
-                pending_paragraph_break = false;
-                at_start = false;
+            // HardBreak is an explicit line break; SoftBreak should be a space.
+            Event::HardBreak => {
+                push_break(&mut out, "<br>", &mut last_was_break);
+            }
+            Event::SoftBreak => {
+                out.push(Event::Text(CowStr::from(" ")));
+                last_was_break = false;
             }
 
-            // Avoid recursive sidenotes inside sidenotes
-            Event::FootnoteReference(_label) => {
-                // Either drop, or render a literal marker.
+            // Rewrite raw HTML that is invalid inside <span>.
+            Event::Html(s) => {
+                out.push(Event::InlineHtml(rewrite_sidenote_html(s)));
+                last_was_break = false;
             }
+            Event::InlineHtml(s) => {
+                out.push(Event::InlineHtml(rewrite_sidenote_html(s)));
+                last_was_break = false;
+            }
+
+            // Avoid recursive footnote references inside footnote bodies.
+            Event::FootnoteReference(_) => {}
 
             other => {
                 out.push(other);
-                pending_paragraph_break = false;
-                at_start = false;
+                last_was_break = false;
             }
         }
     }
 
     out
+}
+
+fn rewrite_sidenote_html<'a>(s: CowStr<'a>) -> CowStr<'a> {
+    let raw = s.as_ref();
+
+    // Minimal, targeted sanitisation for your current content.
+    if !raw.contains("<footer") && !raw.contains("</footer>") {
+        return s;
+    }
+
+    // If you ever add attributes to <footer>, this can be made more robust,
+    // but this matches your present usage.
+    let mut out = raw.replace("<footer>", r#"<span class="sidenote-cite">"#);
+    out = out.replace("</footer>", "</span>");
+    CowStr::from(out)
 }
