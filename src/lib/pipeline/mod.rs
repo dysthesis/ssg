@@ -86,7 +86,9 @@ impl BuildCtx {
         options.insert(Options::ENABLE_SMART_PUNCTUATION);
 
         let mut min_cfg = Cfg::new();
-        min_cfg.minify_css = true;
+        // Keep HTML minification aggressive, but leave CSS minification to
+        // lightningcss (or external pipelines) to avoid double-processing.
+        min_cfg.minify_css = false;
         min_cfg.minify_js = true;
         min_cfg.allow_optimal_entities = true;
         min_cfg.allow_noncompliant_unquoted_attribute_values = true;
