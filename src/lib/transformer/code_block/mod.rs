@@ -6,11 +6,15 @@ use std::{
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
 use syntect::{
     highlighting::ThemeSet,
-    html::highlighted_html_for_string,
+    html::{ClassStyle, ClassedHTMLGenerator, css_for_theme_with_class_style},
     parsing::{SyntaxReference, SyntaxSet},
+    util::LinesWithEndings,
 };
 
-use crate::{transformer::Transformer, utils::escape_html};
+use crate::{
+    transformer::Transformer,
+    utils::{escape_attr, escape_html},
+};
 
 /// An enum to keep track of the state of the highlighter in the code block.
 pub enum CodeBlockState<'a> {
@@ -74,15 +78,14 @@ where
                         };
 
                         let syntax_set = syntax_set();
-                        let theme = theme();
 
                         let syntax: &SyntaxReference = language
                             .and_then(|lang| syntax_set.find_syntax_by_token(lang))
                             .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
 
                         let rendered =
-                            highlighted_html_for_string(&self.buffer, syntax_set, syntax, &theme)
-                                .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
+                            render_classed_html(&self.buffer, syntax_set, syntax, language)
+                                .unwrap_or_else(|| fallback_plain(&self.buffer, language));
 
                         return Some(Event::Html(CowStr::from(rendered)));
                     }
@@ -114,17 +117,56 @@ fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
-fn theme() -> syntect::highlighting::Theme {
-    let raw_theme = include_bytes!("../../../../assets/theme.tmTheme");
-    let cursor = Cursor::new(raw_theme);
-    let mut reader = BufReader::new(cursor);
-    ThemeSet::load_from_reader(&mut reader).unwrap_or_default()
+static THEME: OnceLock<syntect::highlighting::Theme> = OnceLock::new();
+fn theme() -> &'static syntect::highlighting::Theme {
+    THEME.get_or_init(|| {
+        let raw_theme = include_bytes!("../../../../assets/theme.tmTheme");
+        let cursor = Cursor::new(raw_theme);
+        let mut reader = BufReader::new(cursor);
+        ThemeSet::load_from_reader(&mut reader).unwrap_or_default()
+    })
+}
+
+static HIGHLIGHT_CSS: OnceLock<String> = OnceLock::new();
+/// Return the CSS needed for class-based syntax highlighting.
+pub fn highlight_css() -> &'static str {
+    HIGHLIGHT_CSS.get_or_init(|| {
+        css_for_theme_with_class_style(theme(), ClassStyle::Spaced).unwrap_or_default()
+    })
+}
+
+fn render_classed_html(
+    source: &str,
+    syntax_set: &SyntaxSet,
+    syntax: &SyntaxReference,
+    language: Option<&str>,
+) -> Option<String> {
+    let mut generator =
+        ClassedHTMLGenerator::new_with_class_style(syntax, syntax_set, ClassStyle::Spaced);
+
+    for line in LinesWithEndings::from(source) {
+        generator
+            .parse_html_for_line_which_includes_newline(line)
+            .ok()?;
+    }
+
+    let mut out = String::with_capacity(source.len() + 48);
+    out.push_str("<pre class=\"code");
+    if let Some(lang) = language {
+        out.push(' ');
+        out.push_str("language-");
+        out.push_str(&escape_attr(lang));
+    }
+    out.push_str("\"><code>");
+    out.push_str(&generator.finalize());
+    out.push_str("</code></pre>\n");
+    Some(out)
 }
 
 /// Backup renderer in case syntect fails for whatever reason
 pub fn fallback_plain(source: &str, language: Option<&str>) -> String {
     let mut out = String::with_capacity(source.len() + 32);
-    out.push_str("<pre><code");
+    out.push_str("<pre class=\"code\"><code");
     if let Some(lang) = language {
         out.push_str(" class=\"language-");
         out.push_str(lang);

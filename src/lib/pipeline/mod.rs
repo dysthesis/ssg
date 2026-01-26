@@ -1,10 +1,13 @@
 use std::{
     collections::BTreeMap,
-    fs, io,
+    fs,
+    io::{self, Write},
     path::{Path, PathBuf},
 };
 
+use brotli::CompressorWriter;
 use color_eyre::{Section, eyre::eyre};
+use flate2::{Compression, write::GzEncoder};
 use minify_html::{Cfg, minify};
 use pulldown_cmark::{Event, Options, Parser};
 use walkdir::WalkDir;
@@ -82,6 +85,19 @@ impl BuildCtx {
         options.insert(Options::ENABLE_SUBSCRIPT);
         options.insert(Options::ENABLE_SMART_PUNCTUATION);
 
+        let mut min_cfg = Cfg::new();
+        min_cfg.minify_css = true;
+        min_cfg.minify_js = true;
+        min_cfg.allow_optimal_entities = true;
+        min_cfg.allow_noncompliant_unquoted_attribute_values = true;
+        min_cfg.allow_removing_spaces_between_attributes = true;
+        min_cfg.minify_doctype = true;
+        min_cfg.remove_bangs = true;
+        min_cfg.remove_processing_instructions = true;
+        min_cfg.keep_closing_tags = false;
+        min_cfg.keep_comments = false;
+        min_cfg.keep_html_and_head_opening_tags = false;
+
         Ok(Self {
             current_dir,
             input_dir,
@@ -90,7 +106,7 @@ impl BuildCtx {
             footer_html,
             site_meta,
             parser_options: options,
-            min_cfg: Cfg::new(),
+            min_cfg,
         })
     }
 }
@@ -263,7 +279,59 @@ fn emit_docs(
         fs::write(stylesheet_out_path, stylesheet)?;
     }
 
+    precompress_outputs(&ctx.output_dir)?;
+
     Ok(())
+}
+
+fn precompress_outputs(output_dir: &Path) -> color_eyre::Result<()> {
+    const TARGET_EXTS: &[&str] = &["html", "css", "xml", "js", "json"];
+
+    for entry in WalkDir::new(output_dir).into_iter().filter_map(Result::ok) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let path = entry.path();
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !TARGET_EXTS.contains(&ext) {
+            continue;
+        }
+
+        let data = fs::read(path)?;
+        write_gzip_variant(path, &data)?;
+        write_brotli_variant(path, &data)?;
+    }
+
+    Ok(())
+}
+
+fn write_gzip_variant(path: &Path, data: &[u8]) -> io::Result<()> {
+    let out_path = path.with_file_name(format!(
+        "{}.gz",
+        path.file_name()
+            .map(|f| f.to_string_lossy())
+            .unwrap_or_default()
+    ));
+
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(data)?;
+    let compressed = encoder.finish()?;
+    fs::write(out_path, compressed)
+}
+
+fn write_brotli_variant(path: &Path, data: &[u8]) -> io::Result<()> {
+    let out_path = path.with_file_name(format!(
+        "{}.br",
+        path.file_name()
+            .map(|f| f.to_string_lossy())
+            .unwrap_or_default()
+    ));
+
+    let mut writer = CompressorWriter::new(Vec::new(), 4096, 11, 22);
+    writer.write_all(data)?;
+    let compressed = writer.into_inner();
+    fs::write(out_path, compressed)
 }
 
 fn build_index(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {

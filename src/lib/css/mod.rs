@@ -1,5 +1,6 @@
 use std::{fs, path::Path};
 
+use crate::transformer::code_block::highlight_css;
 use color_eyre::eyre::eyre;
 use lightningcss::{
     printer::PrinterOptions,
@@ -7,7 +8,9 @@ use lightningcss::{
 };
 
 pub fn build_css(css_path: &Path) -> color_eyre::Result<String> {
-    let raw = fs::read_to_string(css_path)?;
+    let mut raw = fs::read_to_string(css_path)?;
+    raw.push('\n');
+    raw.push_str(highlight_css());
 
     let mut stylesheet = StyleSheet::parse(
         &raw,

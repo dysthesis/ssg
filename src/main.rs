@@ -69,7 +69,11 @@ async fn serve() -> color_eyre::Result<()> {
 
     // Setup Axum router
     let app = Router::new()
-        .fallback_service(ServeDir::new(public_dir))
+        .fallback_service(
+            ServeDir::new(public_dir)
+                .precompressed_br()
+                .precompressed_gzip(),
+        )
         .layer(livereload);
 
     println!("Serving on http://localhost:3000");
