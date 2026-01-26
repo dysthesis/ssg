@@ -31,8 +31,6 @@ where
 }
 
 /// Insert a margin TOC (based on h2 and h3) and assign ids to headings when absent.
-///
-/// With your current pipeline, Markdown `#` becomes HTML `h2`, and `##` becomes `h3`.
 pub fn insert_toc_and_heading_ids<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
     let TocExtraction {
         events: body,
@@ -61,7 +59,6 @@ fn build_toc_html(headings: &[HeadingEntry]) -> String {
     let mut sub_open = false;
 
     let mut s = String::new();
-    // Anchor constrains percentage margins to the text column width.
     s.push_str(r#"<div class="toc-anchor">"#);
 
     s.push_str(r#"<nav class="toc marginnote" aria-label="Contents">"#);
@@ -101,7 +98,6 @@ fn build_toc_html(headings: &[HeadingEntry]) -> String {
                 sub_open = true;
             }
         } else if matches!(entry.level, HeadingLevel::H3) {
-            // If an h3 appears without a preceding h2, render it as a standalone top-level item.
             if !li_open {
                 h2_n += 1;
                 h3_n = 0;
@@ -170,7 +166,6 @@ fn extract_headings<'a>(events: Vec<Event<'a>>) -> TocExtraction<'a> {
     let mut slug_counts: std::collections::HashMap<String, usize> =
         std::collections::HashMap::new();
 
-    // Track current heading: (level, start_index_in_out, collected_title, existing_id)
     let mut in_heading: Option<(HeadingLevel, usize, String, Option<String>)> = None;
 
     for ev in events {
@@ -187,7 +182,6 @@ fn extract_headings<'a>(events: Vec<Event<'a>>) -> TocExtraction<'a> {
                 let start_index = out.len();
                 let existing_id = id.as_ref().map(|c| c.to_string());
 
-                // Write a placeholder start tag; we will patch in the id at the end tag.
                 out.push(Event::Start(Tag::Heading {
                     level,
                     id: None,
@@ -217,7 +211,6 @@ fn extract_headings<'a>(events: Vec<Event<'a>>) -> TocExtraction<'a> {
                 let base = existing_id.clone().unwrap_or_else(|| slugify(&title));
                 let unique = uniquify_slug(base, &mut slug_counts);
 
-                // Patch the start event with the final id.
                 let old = std::mem::replace(&mut out[*start_index], Event::Text(CowStr::from("")));
                 out[*start_index] = match old {
                     Event::Start(Tag::Heading {
@@ -244,10 +237,8 @@ fn extract_headings<'a>(events: Vec<Event<'a>>) -> TocExtraction<'a> {
                 in_heading = None;
             }
 
-            // Any other event while in a heading: forward it, but do not add to title text.
             (Some(_), other) => out.push(other),
 
-            // Not in heading: pass through unchanged.
             (None, other) => out.push(other),
         }
     }
@@ -268,4 +259,5 @@ fn uniquify_slug(base: String, counts: &mut std::collections::HashMap<String, us
     }
 }
 
-// escape functions provided by utils
+#[cfg(test)]
+mod tests;

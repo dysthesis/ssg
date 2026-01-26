@@ -21,6 +21,7 @@
         cargo-nextest
         rust-analyzer
         cargo-wizard
+        cargo-llvm-cov
         bacon
         inputs'.rustowl.packages.default
 

@@ -3,14 +3,11 @@ use pulldown_cmark::{CowStr, Event};
 
 use crate::transformer::Transformer;
 
-/// An adapter over pulldown_cmark parser in order to render math expressions
-/// with custom strategies, e.g. KaTeX-based server-side rendering.
+/// Render math expressions via KaTeX.
 pub struct MathTransformer<'a, I>
 where
     I: Iterator<Item = Event<'a>>,
 {
-    /// The inner iterator. Can be the raw `Parser`, another `Transformer`, or
-    /// other iterators over `Event<'a>`.
     inner: I,
 }
 
@@ -55,3 +52,6 @@ where
         Self { inner }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -1,21 +1,21 @@
 use std::{collections::BTreeMap, fs, io, path::PathBuf};
 
-use color_eyre::{Section, eyre::eyre};
+use color_eyre::{eyre::eyre, Section};
 use itertools::{Either, Itertools};
-use minify_html::{Cfg, minify};
+use minify_html::{minify, Cfg};
 use pulldown_cmark::{Event, Options, Parser};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::{
-    article::{Article, render_listing_page},
+    article::{render_listing_page, Article},
     config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
     css::build_css,
     header::Header,
     templates::page_shell,
     transformer::{
-        WithTransformer, code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
+        code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
         footnote::FootnoteTransformer, heading::HeadingDemoterTransformer,
-        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer,
+        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer, WithTransformer,
     },
     types::{Href, RelPath, Tag},
     utils::{escape_attr, prefix_to_root},
@@ -348,3 +348,6 @@ fn build_tag_indices(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests;

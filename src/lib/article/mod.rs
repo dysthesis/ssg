@@ -58,3 +58,6 @@ pub fn render_listing_page(
 
     crate::templates::listing_page(page_title, heading, &body, head_includes, href_prefix)
 }
+
+#[cfg(test)]
+mod tests;

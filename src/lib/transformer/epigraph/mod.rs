@@ -40,7 +40,6 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
                 if let Some(epigraph) = block.and_then(EpigraphBlock::from_events) {
                     render_epigraph(&mut out, epigraph);
                 } else {
-                    // Fallback: emit original blockquote content as-is
                     out.push(Event::Start(Tag::BlockQuote(None)));
                     out.extend(events[i - consumed + 1..i - 1].iter().cloned());
                     out.push(Event::End(TagEnd::BlockQuote(None)));
@@ -115,16 +114,13 @@ fn is_epigraph(buffer: &[Event]) -> bool {
 }
 
 fn render_epigraph<'a>(out: &mut Vec<Event<'a>>, block: EpigraphBlock<'a>) {
-    // Open container
     out.push(Event::Html(CowStr::from(r#"<div class="epigraph">"#)));
     out.push(Event::Html(CowStr::from("\n")));
 
-    // 1. Render the quote body
     out.push(Event::Html(CowStr::from(r#"<blockquote>"#)));
     out.extend(block.quote);
     out.push(Event::Html(CowStr::from(r#"</blockquote>"#)));
 
-    // 2. Render the attribution
     out.push(Event::Html(CowStr::from(r#"<p class="attribution">"#)));
 
     for event in block.attribution {
@@ -142,3 +138,6 @@ fn render_epigraph<'a>(out: &mut Vec<Event<'a>>, block: EpigraphBlock<'a>) {
     out.push(Event::Html(CowStr::from(r#"</div>"#)));
     out.push(Event::Html(CowStr::from("\n")));
 }
+
+#[cfg(test)]
+mod tests;

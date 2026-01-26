@@ -71,3 +71,6 @@ pub fn prefix_to_root(rel_out: &std::path::Path) -> String {
         .unwrap_or(0);
     "../".repeat(depth)
 }
+
+#[cfg(test)]
+mod tests;

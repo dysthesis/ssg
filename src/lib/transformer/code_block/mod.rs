@@ -12,9 +12,7 @@ use syntect::{
 
 use crate::{transformer::Transformer, utils::escape_html};
 
-/// An enum to keep track of the state of the highlighter in the code block,
-/// `i.e.` whether or not we are in a code block, and whether or not we are
-/// entering or exiting one.
+/// An enum to keep track of the state of the highlighter in the code block.
 pub enum CodeBlockState<'a> {
     /// Not in code block, pass through the event as-is.
     Passthrough,
@@ -33,9 +31,7 @@ where
     /// Buffer to accumulate any code.
     buffer: String,
     /// Current state of the transformer; are we inside a code block?
-    state: CodeBlockState<'a>, // events are bound to the Markdown source
-                               // string; likewise is the language name for the
-                               // current state
+    state: CodeBlockState<'a>,
 }
 
 impl<'a, I> Iterator for CodeHighlightTransformer<'a, I>
@@ -67,20 +63,17 @@ where
                 CodeBlockState::Accumulating { lang: _ } => {
                     match event {
                         Event::End(TagEnd::CodeBlock) => {
-                            // Extract the kind before transitioning state
                             let CodeBlockState::Accumulating { lang } =
                                 std::mem::replace(&mut self.state, CodeBlockState::Passthrough)
                             else {
                                 unreachable!()
                             };
 
-                            // Convert CodeBlockKind to Option<&str>
                             let language = match lang {
                                 CodeBlockKind::Fenced(ref l) => Some(l.as_ref()),
                                 CodeBlockKind::Indented => None,
                             };
 
-                            // Perform the actual highlighting
                             let syntax_set = syntax_set();
                             let theme = theme();
 
@@ -96,7 +89,6 @@ where
                             )
                             .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
 
-                            // Return the transformed content as an Html event
                             return Some(Event::Html(CowStr::from(rendered)));
                         }
                         Event::Text(text) | Event::Code(text) => {
@@ -115,9 +107,7 @@ where
                             self.buffer.push_str(math.as_ref());
                             continue;
                         }
-                        _ => {
-                            continue;
-                        }
+                        _ => continue,
                     }
                 }
             }
@@ -131,7 +121,7 @@ fn syntax_set() -> &'static SyntaxSet {
 }
 
 fn theme() -> syntect::highlighting::Theme {
-    let raw_theme = include_bytes!("../../../assets/theme.tmTheme");
+    let raw_theme = include_bytes!("../../../../assets/theme.tmTheme");
     let cursor = Cursor::new(raw_theme);
     let mut reader = BufReader::new(cursor);
     ThemeSet::load_from_reader(&mut reader).unwrap_or_default()
@@ -164,3 +154,6 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -58,3 +58,6 @@ where
         Self { inner }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -18,7 +18,20 @@
           ];
         };
 
-        craneLib = crane.mkLib pkgs;
+        toolchain =
+          pkgs.rust-bin.selectLatestNightlyWith
+          (toolchain:
+            toolchain.default.override {
+              extensions = [
+                "rust-src"
+                "clippy"
+                "rust-analyzer"
+                "llvm-tools-preview"
+                "rustfmt"
+              ];
+            });
+
+        craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
 
         # Common arguments can be set here to avoid repeating them later
         # NOTE: changes here will rebuild all dependency crates

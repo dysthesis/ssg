@@ -1,14 +1,12 @@
-//! This modules contains the data types shared across the static site
-//! generator. Each data type is implemented as a newtype pattern with methods
-//! to ensure that any invariants that the type should have are always
-//! maintained.
+//! Shared data types for the static site generator.
+//! Implemented as newtypes to enforce invariants.
 
 use std::{
     fmt,
     path::{Path, PathBuf},
 };
 
-use time::{Date, format_description};
+use time::{format_description, Date};
 
 /// Date format used for mtime and ctime.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -128,3 +126,6 @@ impl fmt::Display for Href {
         f.write_str(&self.0)
     }
 }
+
+#[cfg(test)]
+mod tests;

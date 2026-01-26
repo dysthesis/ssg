@@ -48,7 +48,6 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
 
         match event {
             Event::Start(Tag::FootnoteDefinition(_label)) => {
-                // Skip rendering definitions at the bottom.
                 skipping_definition_depth = 1;
             }
 
@@ -87,7 +86,6 @@ impl<'a> FootnoteDefinitions<'a> {
                 Event::Start(Tag::FootnoteDefinition(label)) => {
                     let key = label.to_string();
 
-                    // Capture everything inside this definition block.
                     let mut depth: usize = 1;
                     let mut inner: Vec<Event<'a>> = Vec::new();
 
@@ -124,10 +122,6 @@ impl<'a> FootnoteDefinitions<'a> {
     }
 }
 
-/// Render a footnote definition in a way that is safe inside `<span class="sidenote">…</span>`.
-///
-/// This removes block-level tags (`<p>`, `<blockquote>`) and replaces their structure with
-/// inline HTML (`<br>`, `<span class="sidenote-quote">…</span>`).
 fn render_definition_as_inline_html<'a>(events: &[Event<'a>]) -> String {
     let inline_events = inlineify_definition_events(events);
 
@@ -140,8 +134,6 @@ fn render_definition_as_inline_html<'a>(events: &[Event<'a>]) -> String {
 fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
     let mut out: Vec<Event<'a>> = Vec::with_capacity(events.len());
 
-    // Whether the *next* paragraph in the current container needs a separator.
-    // Index 0 is the top-level footnote definition container.
     let mut need_par_sep_stack: Vec<bool> = vec![false];
 
     let mut quote_depth: usize = 0;
@@ -156,7 +148,6 @@ fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
 
     for ev in events.iter().cloned() {
         match ev {
-            // Drop paragraph tags; insert separators between paragraphs.
             Event::Start(Tag::Paragraph) => {
                 if *need_par_sep_stack.last().unwrap_or(&false) {
                     if quote_depth > 0 {
@@ -176,7 +167,6 @@ fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
                 last_was_break = false;
             }
 
-            // Replace blockquote with an inline wrapper.
             Event::Start(Tag::BlockQuote(_)) => {
                 if !out.is_empty() {
                     push_break(&mut out, "<br><br>", &mut last_was_break);
@@ -198,7 +188,6 @@ fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
                 last_was_break = false;
             }
 
-            // HardBreak is an explicit line break; SoftBreak should be a space.
             Event::HardBreak => {
                 push_break(&mut out, "<br>", &mut last_was_break);
             }
@@ -207,7 +196,6 @@ fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
                 last_was_break = false;
             }
 
-            // Rewrite raw HTML that is invalid inside <span>.
             Event::Html(s) => {
                 out.push(Event::InlineHtml(rewrite_sidenote_html(s)));
                 last_was_break = false;
@@ -217,7 +205,6 @@ fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
                 last_was_break = false;
             }
 
-            // Avoid recursive footnote references inside footnote bodies.
             Event::FootnoteReference(_) => {}
 
             other => {
@@ -233,14 +220,14 @@ fn inlineify_definition_events<'a>(events: &[Event<'a>]) -> Vec<Event<'a>> {
 fn rewrite_sidenote_html<'a>(s: CowStr<'a>) -> CowStr<'a> {
     let raw = s.as_ref();
 
-    // Minimal, targeted sanitisation for your current content.
     if !raw.contains("<footer") && !raw.contains("</footer>") {
         return s;
     }
 
-    // If you ever add attributes to <footer>, this can be made more robust,
-    // but this matches your present usage.
     let mut out = raw.replace("<footer>", r#"<span class="sidenote-cite">"#);
     out = out.replace("</footer>", "</span>");
     CowStr::from(out)
 }
+
+#[cfg(test)]
+mod tests;
