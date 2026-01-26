@@ -75,9 +75,6 @@ fn build_once_emits_expected_paths() {
             &(rel_markdown_path(), any::<bool>()),
             |(rel_path, has_math)| {
                 let tmp = TempDir::new().expect("tempdir");
-                let cwd = std::env::current_dir().unwrap();
-                let _guard = DirGuard(cwd.clone());
-                std::env::set_current_dir(tmp.path()).unwrap();
 
                 let content_dir = PathBuf::from(INPUT_DIR);
                 let full_md = tmp.path().join(&content_dir).join(&rel_path);
@@ -94,7 +91,7 @@ fn build_once_emits_expected_paths() {
 
                 std::fs::write(tmp.path().join("style.css"), "body { color: black; }").unwrap();
 
-                build_once().unwrap();
+                build_at(tmp.path()).unwrap();
 
                 let rel_out = PathBuf::from(POSTS_DIR).join(rel_path.with_extension("html"));
                 let out_file = tmp.path().join(OUTPUT_DIR).join(&rel_out);
