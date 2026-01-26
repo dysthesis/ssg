@@ -5,10 +5,9 @@ use std::{
 };
 
 use color_eyre::{Section, eyre::eyre};
-use itertools::{Either, Itertools};
 use minify_html::{Cfg, minify};
 use pulldown_cmark::{Event, Options, Parser};
-use walkdir::{DirEntry, WalkDir};
+use walkdir::WalkDir;
 
 use crate::{
     article::{Article, render_listing_page},
@@ -91,26 +90,40 @@ impl BuildCtx {
     }
 }
 
-fn discover_sources(ctx: &BuildCtx) -> color_eyre::Result<Vec<(DirEntry, String)>> {
-    let (dir_entries, errors): (Vec<DirEntry>, Vec<walkdir::Error>) = WalkDir::new(&ctx.input_dir)
-        .into_iter()
-        .partition_map(|r| match r {
-            Ok(v) => Either::Left(v),
-            Err(e) => Either::Right(e),
-        });
+fn discover_sources(ctx: &BuildCtx) -> color_eyre::Result<Vec<(PathBuf, String)>> {
+    let mut md_paths: Vec<PathBuf> = Vec::new();
+    let mut walk_errors: Vec<walkdir::Error> = Vec::new();
 
-    if !errors.is_empty() {
-        return Err(eyre!("Failed to open some directory entries: {errors:?}"));
+    for item in WalkDir::new(&ctx.input_dir) {
+        match item {
+            Ok(entry) => {
+                if entry.file_type().is_file()
+                    && entry.path().extension().is_some_and(|ext| ext == "md")
+                {
+                    md_paths.push(entry.path().to_path_buf());
+                }
+            }
+            Err(e) => walk_errors.push(e),
+        }
     }
 
-    let (docs, file_errors): (Vec<(DirEntry, String)>, Vec<std::io::Error>) = dir_entries
-        .into_iter()
-        .filter(|e| e.file_type().is_file())
-        .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
-        .partition_map(|e| match fs::read_to_string(e.path()) {
-            Ok(content) => Either::Left((e, content)),
-            Err(e) => Either::Right(e),
-        });
+    if !walk_errors.is_empty() {
+        return Err(eyre!(
+            "Failed to open some directory entries: {walk_errors:?}"
+        ));
+    }
+
+    md_paths.sort();
+
+    let mut docs: Vec<(PathBuf, String)> = Vec::with_capacity(md_paths.len());
+    let mut file_errors: Vec<(PathBuf, std::io::Error)> = Vec::new();
+
+    for path in md_paths {
+        match fs::read_to_string(&path) {
+            Ok(content) => docs.push((path, content)),
+            Err(e) => file_errors.push((path, e)),
+        }
+    }
 
     if !file_errors.is_empty() {
         return Err(eyre!("Failed to open some files: {file_errors:?}"));
@@ -118,19 +131,16 @@ fn discover_sources(ctx: &BuildCtx) -> color_eyre::Result<Vec<(DirEntry, String)
 
     Ok(docs)
 }
-
 fn parse_sources(
     ctx: &BuildCtx,
-    sources: Vec<(DirEntry, String)>,
+    sources: Vec<(PathBuf, String)>,
 ) -> color_eyre::Result<Vec<ParsedDoc>> {
     let mut parsed = Vec::with_capacity(sources.len());
-    for (entry, content) in sources {
-        let rel_src = entry
-            .path()
+    for (full_path, content) in sources {
+        let rel_src = full_path
             .strip_prefix(&ctx.input_dir)
-            .ok()
             .map(|p| p.to_owned())
-            .ok_or_else(|| eyre!("Path outside input_dir"))?;
+            .map_err(|_| eyre!("Path outside input_dir"))?;
         parsed.push((rel_src, content));
     }
     Ok(parsed)
@@ -278,7 +288,7 @@ impl Pipeline<()> {
     }
 }
 
-struct Discovered(Vec<(DirEntry, String)>);
+struct Discovered(Vec<(PathBuf, String)>);
 impl PipelineStage for Discovered {}
 struct Parsed(Vec<ParsedDoc>);
 impl PipelineStage for Parsed {}

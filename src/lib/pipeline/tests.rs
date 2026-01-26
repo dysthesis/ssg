@@ -12,7 +12,7 @@ use walkdir::WalkDir;
 
 use crate::{
     config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
-    pipeline::build_once,
+    pipeline::{build_at, build_once},
 };
 
 // Simple guard to restore cwd even on panic.
@@ -135,10 +135,10 @@ fn build_is_deterministic_across_runs() {
     let md = "---\ntitle: Deterministic\nctime: 2024-02-02\n---\nHello world.\n";
     write_md(tmp.path(), Path::new("single.md"), md).unwrap();
 
-    build_once().unwrap();
+    build_at(tmp.path()).unwrap();
     let first = snapshot_public(&tmp.path().join(OUTPUT_DIR)).unwrap();
 
-    build_once().unwrap();
+    build_at(tmp.path()).unwrap();
     let second = snapshot_public(&tmp.path().join(OUTPUT_DIR)).unwrap();
 
     assert_eq!(first, second);
@@ -147,9 +147,6 @@ fn build_is_deterministic_across_runs() {
 #[test]
 fn math_pages_toggle_katex_link() {
     let tmp = TempDir::new().expect("tempdir");
-    let cwd = std::env::current_dir().unwrap();
-    let _guard = DirGuard(cwd);
-    std::env::set_current_dir(tmp.path()).unwrap();
 
     fs::create_dir_all(INPUT_DIR).unwrap();
     fs::write("style.css", "body { color: black; }").unwrap();
@@ -159,7 +156,7 @@ fn math_pages_toggle_katex_link() {
     write_md(tmp.path(), Path::new("math.md"), math).unwrap();
     write_md(tmp.path(), Path::new("plain.md"), plain).unwrap();
 
-    build_once().unwrap();
+    build_at(tmp.path()).unwrap();
 
     let math_html = read_public(&tmp, Path::new(POSTS_DIR).join("math.html"));
     let plain_html = read_public(&tmp, Path::new(POSTS_DIR).join("plain.html"));
@@ -171,9 +168,6 @@ fn math_pages_toggle_katex_link() {
 #[test]
 fn tag_pages_are_filtered_and_sorted() {
     let tmp = TempDir::new().expect("tempdir");
-    let cwd = std::env::current_dir().unwrap();
-    let _guard = DirGuard(cwd);
-    std::env::set_current_dir(tmp.path()).unwrap();
 
     fs::create_dir_all(INPUT_DIR).unwrap();
     fs::write("style.css", "body { color: black; }").unwrap();
@@ -223,9 +217,6 @@ fn asset_prefixes_match_depth() {
     runner
         .run(&rel_markdown_path(), |rel_path| {
             let tmp = TempDir::new().expect("tempdir");
-            let cwd = std::env::current_dir().unwrap();
-            let _guard = DirGuard(cwd.clone());
-            std::env::set_current_dir(tmp.path()).unwrap();
 
             fs::create_dir_all(INPUT_DIR).unwrap();
             fs::write("style.css", "body { color: black; }").unwrap();
@@ -233,7 +224,7 @@ fn asset_prefixes_match_depth() {
             let md = "---\ntitle: PrefixTest\nctime: 2024-04-04\n---\nContent\n";
             write_md(tmp.path(), rel_path.as_path(), md).unwrap();
 
-            build_once().unwrap();
+            build_at(tmp.path()).unwrap();
 
             let rel_out = PathBuf::from(POSTS_DIR).join(rel_path.with_extension("html"));
             let html = read_public(&tmp, rel_out.clone());
