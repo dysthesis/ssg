@@ -12,8 +12,10 @@ use walkdir::WalkDir;
 use crate::{
     article::{Article, render_listing_page},
     config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
+    config::{SiteMeta, site_meta},
     css::build_css,
-    header::Header,
+    feed::write_feeds,
+    header::{Header, generic_og_meta},
     templates::page_shell,
     transformer::{
         WithTransformer, code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
@@ -53,6 +55,7 @@ struct BuildCtx {
     output_dir: PathBuf,
     head_html: String,
     footer_html: String,
+    site_meta: SiteMeta,
     parser_options: Options,
     min_cfg: Cfg,
 }
@@ -67,6 +70,7 @@ impl BuildCtx {
             .unwrap_or_default();
         let footer_html = fs::read_to_string(current_dir.join("footer").with_extension("html"))
             .unwrap_or_default();
+        let site_meta = site_meta();
 
         let mut options = Options::empty();
         options.insert(Options::ENABLE_GFM);
@@ -84,6 +88,7 @@ impl BuildCtx {
             output_dir,
             head_html,
             footer_html,
+            site_meta,
             parser_options: options,
             min_cfg: Cfg::new(),
         })
@@ -164,6 +169,7 @@ fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<Rend
         let href = Href::from_rel(&rel_out);
         let prefix = prefix_to_root(rel_out.as_path());
         let css_href = format!("{prefix}style.css");
+        let page_url = format!("{}/{}", ctx.site_meta.base_url, href.as_str());
 
         let header = Header::try_from(content.as_str()).unwrap_or_default();
         let body_header = header.generate_body_head(&prefix);
@@ -176,7 +182,8 @@ fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<Rend
             .any(|e| matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)));
 
         let katex_href = format!("{prefix}assets/katex/katex.min.css");
-        let head_fragment = header.to_html(&css_href, has_math, &katex_href);
+        let mut head_fragment = header.to_html(&css_href, has_math, &katex_href);
+        head_fragment.push_str(&header.opengraph_meta(&page_url, &ctx.site_meta));
 
         // Apply transformers
         let transformed = events
@@ -204,9 +211,13 @@ fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<Rend
             .map(ToOwned::to_owned)
             .unwrap_or_else(|| rel_out.as_path().to_string_lossy().to_string());
 
+        let summary = header.description().map(ToOwned::to_owned);
+
         let article = Article {
             title,
             ctime: header.ctime(),
+            updated: header.mtime(),
+            summary,
             href,
             tags: header.tags().0,
         };
@@ -242,6 +253,7 @@ fn emit_docs(
 
     build_index(ctx, articles)?;
     build_tag_indices(ctx, articles)?;
+    write_feeds(&ctx.output_dir, articles)?;
 
     // Minify and copy over style.css
     let stylesheet_in_path = ctx.current_dir.join("style").with_extension("css");
@@ -257,8 +269,24 @@ fn emit_docs(
 fn build_index(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {
     let index_rel = std::path::Path::new("index.html");
     let index_prefix = prefix_to_root(index_rel);
+    let page_url = format!("{}/index.html", ctx.site_meta.base_url);
 
-    let index_html = render_listing_page("Index", "Index", articles, &ctx.head_html, &index_prefix);
+    let mut head_includes = String::new();
+    head_includes.push_str(&ctx.head_html);
+    head_includes.push_str(&format!(
+        r#"
+<meta name="description" content="{}">"#,
+        escape_attr(&ctx.site_meta.description)
+    ));
+    head_includes.push_str(&generic_og_meta(
+        "Index",
+        &ctx.site_meta.description,
+        &page_url,
+        &ctx.site_meta,
+        None,
+    ));
+
+    let index_html = render_listing_page("Index", "Index", articles, &head_includes, &index_prefix);
 
     fs::write(
         ctx.output_dir.join("index.html"),
@@ -350,12 +378,29 @@ fn build_tag_indices(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {
     for (tag, tagged) in by_tag {
         let tag_rel = std::path::PathBuf::from(TAGS_DIR).join(format!("{tag}.html"));
         let tag_prefix = prefix_to_root(&tag_rel);
+        let page_url = format!("{}/tags/{tag}.html", ctx.site_meta.base_url);
+        let page_description = format!("Posts tagged {tag}");
+
+        let mut head_includes = String::new();
+        head_includes.push_str(&ctx.head_html);
+        head_includes.push_str(&format!(
+            r#"
+<meta name="description" content="{}">"#,
+            escape_attr(&page_description)
+        ));
+        head_includes.push_str(&generic_og_meta(
+            &format!("Tag: {tag}"),
+            &page_description,
+            &page_url,
+            &ctx.site_meta,
+            None,
+        ));
 
         let html = render_listing_page(
             &format!("Tag: {tag}"),
             &format!("Tag: {tag}"),
             &tagged,
-            &ctx.head_html,
+            &head_includes,
             &tag_prefix,
         );
 

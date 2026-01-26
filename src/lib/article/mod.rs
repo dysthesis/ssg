@@ -7,6 +7,8 @@ use crate::{
 pub struct Article {
     pub title: String,
     pub ctime: Option<IsoDate>,
+    pub updated: Option<IsoDate>,
+    pub summary: Option<String>,
     pub href: Href,
     pub tags: Vec<Tag>,
 }

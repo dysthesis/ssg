@@ -3,16 +3,18 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use atom_syndication;
 use proptest::{
     prelude::*,
     test_runner::{Config, TestRunner},
 };
+use rss;
 use tempfile::TempDir;
 use walkdir::WalkDir;
 
 use crate::{
-    config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
-    pipeline::{build_at, build_once},
+    config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, SITE_BASE_URL, SITE_DEFAULT_OG_IMAGE, TAGS_DIR},
+    pipeline::build_at,
 };
 
 // Simple guard to restore cwd even on panic.
@@ -61,6 +63,10 @@ fn public_path(tmp: &TempDir, rel: impl AsRef<Path>) -> PathBuf {
 
 fn read_public(tmp: &TempDir, rel: impl AsRef<Path>) -> String {
     fs::read_to_string(public_path(tmp, rel)).expect("public file")
+}
+
+fn read_public_bytes(tmp: &TempDir, rel: impl AsRef<Path>) -> Vec<u8> {
+    fs::read(public_path(tmp, rel)).expect("public file bytes")
 }
 
 #[test]
@@ -245,4 +251,156 @@ fn asset_prefixes_match_depth() {
             Ok(())
         })
         .unwrap();
+}
+
+#[test]
+fn feeds_are_emitted_and_sorted_with_absolute_links() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    fs::create_dir_all(INPUT_DIR).unwrap();
+    fs::write("style.css", "body { color: black; }").unwrap();
+
+    // Older post
+    let older = "---\ntitle: Older\nctime: 2024-01-01\n---\nBody\n";
+    write_md(tmp.path(), Path::new("older.md"), older).unwrap();
+
+    // Newer post with tag
+    let newer = "---\ntitle: Newer\nctime: 2025-01-01\nmtime: 2025-01-02\ntags: [rust]\ndescription: Summary here\n---\nBody\n";
+    write_md(tmp.path(), Path::new("newer.md"), newer).unwrap();
+
+    build_at(tmp.path()).unwrap();
+
+    // RSS assertions
+    let rss_bytes = read_public_bytes(&tmp, Path::new("rss.xml"));
+    let channel = rss::Channel::read_from(&rss_bytes[..]).expect("parse rss");
+    assert_eq!(channel.items().len(), 2);
+    assert_eq!(channel.items()[0].title(), Some("Newer"));
+    assert!(
+        channel.items()[0]
+            .link()
+            .unwrap()
+            .starts_with(SITE_BASE_URL.trim_end_matches('/'))
+    );
+    assert_eq!(channel.items()[0].description(), Some("Summary here"));
+    let categories: Vec<_> = channel.items()[0]
+        .categories()
+        .iter()
+        .map(|c| c.name())
+        .collect();
+    assert!(categories.contains(&"rust"));
+
+    // Atom assertions
+    let atom_bytes = read_public_bytes(&tmp, Path::new("atom.xml"));
+    let feed = atom_syndication::Feed::read_from(&atom_bytes[..]).expect("parse atom");
+    assert_eq!(feed.entries().len(), 2);
+    assert_eq!(feed.entries()[0].title().to_string(), "Newer");
+    assert!(
+        feed.entries()[0]
+            .links()
+            .first()
+            .unwrap()
+            .href()
+            .starts_with(SITE_BASE_URL.trim_end_matches('/'))
+    );
+    assert_eq!(
+        feed.entries()[0].content().as_ref().and_then(|c| c.value()),
+        Some("Summary here")
+    );
+    let atom_cats: Vec<_> = feed.entries()[0]
+        .categories()
+        .iter()
+        .map(|c| c.term())
+        .collect();
+    assert!(atom_cats.contains(&"rust"));
+}
+
+#[test]
+fn article_pages_include_opengraph_meta_with_absolute_urls() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    fs::create_dir_all(INPUT_DIR).unwrap();
+    fs::write("style.css", "body { color: black; }").unwrap();
+
+    let md = r#"---
+title: OG Title
+description: Short desc
+ctime: 2025-01-01
+image: images/pic.png
+---
+Body
+"#;
+    write_md(tmp.path(), Path::new("post.md"), md).unwrap();
+
+    build_at(tmp.path()).unwrap();
+
+    let html = read_public(&tmp, Path::new(POSTS_DIR).join("post.html"));
+    let base = SITE_BASE_URL.trim_end_matches('/');
+
+    assert!(html.contains("property=og:title"));
+    assert!(html.contains("OG Title"));
+    assert!(html.contains("property=og:description"));
+    assert!(html.contains("Short desc"));
+    assert!(html.contains("property=og:type"));
+    assert!(html.contains("article"));
+    assert!(html.contains("property=og:url"));
+    assert!(html.contains(&format!("{base}/posts/post.html")));
+    assert!(html.contains("property=og:image"));
+    assert!(html.contains(&format!("{base}/images/pic.png")));
+    assert!(html.contains("rel=canonical"));
+}
+
+#[test]
+fn default_social_image_is_used_when_frontmatter_is_absent() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    fs::create_dir_all(INPUT_DIR).unwrap();
+    fs::write("style.css", "body { color: black; }").unwrap();
+
+    let md = r#"---
+title: No Image
+description: Uses default
+ctime: 2025-02-01
+---
+Body
+"#;
+    write_md(tmp.path(), Path::new("no-image.md"), md).unwrap();
+
+    build_at(tmp.path()).unwrap();
+
+    let html = read_public(&tmp, Path::new(POSTS_DIR).join("no-image.html"));
+    let base = SITE_BASE_URL.trim_end_matches('/');
+
+    if let Some(default_img) = SITE_DEFAULT_OG_IMAGE {
+        assert!(html.contains("property=og:image"));
+        assert!(html.contains(&format!("{}/{}", base, default_img.trim_start_matches('/'))));
+    } else {
+        panic!("SITE_DEFAULT_OG_IMAGE must be set for this test");
+    }
+}
+
+#[test]
+fn index_page_includes_generic_og_meta() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    fs::create_dir_all(INPUT_DIR).unwrap();
+    fs::write("style.css", "body { color: black; }").unwrap();
+
+    let md = r#"---
+title: Any
+ctime: 2025-03-03
+---
+Body
+"#;
+    write_md(tmp.path(), Path::new("any.md"), md).unwrap();
+
+    build_at(tmp.path()).unwrap();
+
+    let html = read_public(&tmp, Path::new("index.html"));
+    let base = SITE_BASE_URL.trim_end_matches('/');
+
+    assert!(html.contains("property=og:type"));
+    assert!(html.contains("website"));
+    assert!(html.contains("property=og:url"));
+    assert!(html.contains(&format!("{base}/index.html")));
+    assert!(html.contains("Index"));
 }

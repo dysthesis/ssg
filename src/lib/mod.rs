@@ -1,6 +1,7 @@
 pub mod article;
 pub mod config;
 pub mod css;
+pub mod feed;
 pub mod header;
 pub mod pipeline;
 pub mod templates;

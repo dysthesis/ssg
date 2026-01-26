@@ -27,6 +27,8 @@ fn listing_groups_by_year() {
                     articles.push(Article {
                         title: title.clone(),
                         ctime: Some(date),
+                        updated: None,
+                        summary: None,
                         href: Href::from_rel(
                             &RelPath::new(PathBuf::from(format!("{title}.html"))).unwrap(),
                         ),

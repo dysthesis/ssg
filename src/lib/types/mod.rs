@@ -27,6 +27,10 @@ impl IsoDate {
     pub fn year(&self) -> i32 {
         self.0.year()
     }
+
+    pub fn as_date(&self) -> Date {
+        self.0
+    }
 }
 
 impl fmt::Display for IsoDate {
