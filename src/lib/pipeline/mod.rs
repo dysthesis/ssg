@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, fs, io, path::PathBuf};
+use std::{
+    collections::BTreeMap,
+    fs, io,
+    path::{Path, PathBuf},
+};
 
 use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
@@ -27,7 +31,13 @@ type RenderOutcome = (Vec<RenderedPage>, Vec<Article>);
 
 /// Build once into OUTPUT_DIR using current working directory.
 pub fn build_once() -> color_eyre::Result<()> {
-    let ctx = BuildCtx::load()?;
+    let root =
+        std::env::current_dir().with_note(|| "While getting the current working directory")?;
+    build_at(&root)
+}
+
+pub fn build_at(root: &Path) -> color_eyre::Result<()> {
+    let ctx = BuildCtx::load_at(root)?;
     fs::create_dir_all(&ctx.output_dir)?;
 
     Pipeline::new(ctx)
@@ -49,9 +59,8 @@ struct BuildCtx {
 }
 
 impl BuildCtx {
-    fn load() -> color_eyre::Result<Self> {
-        let current_dir =
-            std::env::current_dir().with_note(|| "While getting the current working directory")?;
+    fn load_at(root: &Path) -> color_eyre::Result<Self> {
+        let current_dir = root.to_path_buf();
         let input_dir = current_dir.join(INPUT_DIR);
         let output_dir = current_dir.join(OUTPUT_DIR);
 
