@@ -181,7 +181,7 @@ fn tag_pages_are_filtered_and_sorted() {
         write_md(tmp.path(), Path::new(&format!("{title}.md")), &md).unwrap();
     }
 
-    build_once().unwrap();
+    build_at(tmp.path()).unwrap();
 
     let rust_path = Path::new(TAGS_DIR).join("rust.html");
     let rust_html = read_public(&tmp, rust_path);
