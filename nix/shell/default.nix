@@ -25,6 +25,11 @@
         bacon
         inputs'.rustowl.packages.default
 
+        python3
+        black
+        basedpyright
+        ty
+
         # Prose
         valeConfigured
       ];

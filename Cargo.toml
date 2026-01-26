@@ -32,6 +32,7 @@ criterion = "0.8.0"
 proptest = "1.9.0"
 proptest-derive = "0.7.0"
 tempfile = "3.10.0"
+dhat = "0.3.2"
 
 [lib]
 name = "ssg"
@@ -40,6 +41,30 @@ path = "src/lib/mod.rs"
 [[bin]]
 name = "ssg"
 path = "src/main.rs"
+
+[[bench]]
+name = "criterion_pipeline"
+harness = false
+
+[[bench]]
+name = "criterion_transformers"
+harness = false
+
+[[bench]]
+name = "criterion_io"
+harness = false
+
+[[bench]]
+name = "dhat_build"
+harness = false
+
+[[bench]]
+name = "dhat_transformers"
+harness = false
+
+[[bench]]
+name = "dhat_compress"
+harness = false
 
 [profile.release]
 strip = true
