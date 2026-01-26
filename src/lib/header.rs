@@ -2,6 +2,11 @@ use color_eyre::Section;
 use gray_matter::{Matter, engine::YAML};
 use serde::Deserialize;
 
+use crate::{
+    types::{IsoDate, Tag, Tags},
+    utils::{escape_attr, escape_text},
+};
+
 #[derive(Deserialize, Default, Debug)]
 pub struct Header {
     title: Option<String>,
@@ -25,6 +30,25 @@ impl TryFrom<&str> for Header {
 }
 
 impl Header {
+    pub fn ctime(&self) -> Option<IsoDate> {
+        self.ctime.as_deref().and_then(IsoDate::parse)
+    }
+
+    pub fn mtime(&self) -> Option<IsoDate> {
+        self.mtime.as_deref().and_then(IsoDate::parse)
+    }
+
+    pub fn tags(&self) -> Tags {
+        let parsed = self
+            .tags
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|t| Tag::parse(t))
+            .collect();
+        Tags::new(parsed)
+    }
+
     pub fn to_html(&self, css_href: &str, has_math: bool, katex_href: &str) -> String {
         let mut result = String::new();
 
@@ -115,9 +139,7 @@ impl Header {
     }
 
     fn render_body_meta(&self, href_prefix: &str) -> String {
-        let has_any = self.ctime.is_some()
-            || self.mtime.is_some()
-            || self.tags.as_ref().is_some_and(|t| !t.is_empty());
+        let has_any = self.ctime.is_some() || self.mtime.is_some() || !self.tags().is_empty();
 
         if !has_any {
             return String::new();
@@ -125,29 +147,33 @@ impl Header {
 
         let mut parts: Vec<String> = Vec::new();
 
-        if let Some(ctime) = self.ctime.as_ref() {
+        if let Some(ctime) = self.ctime() {
+            let ctime = ctime.as_str();
             parts.push(format!(
                 r#"<span class="meta-item">Created: <time datetime="{0}">{0}</time></span>"#,
-                escape_attr(ctime)
+                escape_attr(ctime.as_str())
             ));
         }
 
-        if let Some(mtime) = self.mtime.as_ref() {
+        if let Some(mtime) = self.mtime() {
+            let mtime = mtime.as_str();
             parts.push(format!(
                 r#"<span class="meta-item">Updated: <time datetime="{0}">{0}</time></span>"#,
-                escape_attr(mtime)
+                escape_attr(mtime.as_str())
             ));
         }
 
-        if let Some(tags) = self.tags.as_ref().filter(|t| !t.is_empty()) {
-            let rendered_tags = tags
+        if !self.tags().is_empty() {
+            let rendered_tags = self
+                .tags()
+                .0
                 .iter()
                 .map(|t| {
                     let href = format!(r#"{href_prefix}tags/{t}.html"#);
                     format!(
                         r#"<a class="tag" href="{}">{}</a>"#,
                         escape_attr(&href),
-                        escape_text(t)
+                        escape_text(t.as_str())
                     )
                 })
                 .collect::<Vec<_>>()
@@ -168,46 +194,4 @@ impl Header {
     pub fn title(&self) -> Option<&str> {
         self.title.as_deref()
     }
-
-    pub fn ctime(&self) -> Option<&str> {
-        self.ctime.as_deref()
-    }
-
-    pub fn mtime(&self) -> Option<&str> {
-        self.mtime.as_deref()
-    }
-
-    pub fn tags(&self) -> &[String] {
-        self.tags.as_deref().unwrap_or(&[])
-    }
-}
-
-fn escape_text(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#x27;"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
-
-fn escape_attr(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#x27;"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }

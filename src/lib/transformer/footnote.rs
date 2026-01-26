@@ -28,7 +28,7 @@ where
 }
 
 pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
-    let defs = collect_definitions(&events);
+    let defs = FootnoteDefinitions::collect(&events);
 
     let mut out: Vec<Event<'a>> = Vec::with_capacity(events.len());
     let mut skipping_definition_depth: usize = 0;
@@ -57,10 +57,7 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
                 let id = format!("sn-{sidenote_index}");
                 let display = sidenote_index;
 
-                let def_events = defs
-                    .get(label.as_ref())
-                    .map(|v| v.as_slice())
-                    .unwrap_or(&[]);
+                let def_events = defs.get(label.as_ref()).unwrap_or(&[]);
 
                 let def_html = render_definition_as_inline_html(def_events);
 
@@ -78,45 +75,53 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
     out
 }
 
-fn collect_definitions<'a>(events: &[Event<'a>]) -> HashMap<String, Vec<Event<'a>>> {
-    let mut defs: HashMap<String, Vec<Event<'a>>> = HashMap::new();
+struct FootnoteDefinitions<'a>(HashMap<String, Vec<Event<'a>>>);
 
-    let mut i: usize = 0;
-    while i < events.len() {
-        match &events[i] {
-            Event::Start(Tag::FootnoteDefinition(label)) => {
-                let key = label.to_string();
+impl<'a> FootnoteDefinitions<'a> {
+    fn collect(events: &[Event<'a>]) -> Self {
+        let mut defs: HashMap<String, Vec<Event<'a>>> = HashMap::new();
 
-                // Capture everything inside this definition block.
-                let mut depth: usize = 1;
-                let mut inner: Vec<Event<'a>> = Vec::new();
+        let mut i: usize = 0;
+        while i < events.len() {
+            match &events[i] {
+                Event::Start(Tag::FootnoteDefinition(label)) => {
+                    let key = label.to_string();
 
-                i += 1;
-                while i < events.len() && depth > 0 {
-                    match &events[i] {
-                        Event::Start(_) => {
-                            depth += 1;
-                            inner.push(events[i].clone());
-                        }
-                        Event::End(_) => {
-                            depth = depth.saturating_sub(1);
-                            if depth > 0 {
+                    // Capture everything inside this definition block.
+                    let mut depth: usize = 1;
+                    let mut inner: Vec<Event<'a>> = Vec::new();
+
+                    i += 1;
+                    while i < events.len() && depth > 0 {
+                        match &events[i] {
+                            Event::Start(_) => {
+                                depth += 1;
                                 inner.push(events[i].clone());
                             }
+                            Event::End(_) => {
+                                depth = depth.saturating_sub(1);
+                                if depth > 0 {
+                                    inner.push(events[i].clone());
+                                }
+                            }
+                            other => inner.push(other.clone()),
                         }
-                        other => inner.push(other.clone()),
+                        i += 1;
                     }
-                    i += 1;
-                }
 
-                defs.insert(key, inner);
-                continue;
+                    defs.insert(key, inner);
+                    continue;
+                }
+                _ => i += 1,
             }
-            _ => i += 1,
         }
+
+        FootnoteDefinitions(defs)
     }
 
-    defs
+    fn get(&self, key: &str) -> Option<&[Event<'a>]> {
+        self.0.get(key).map(|v| v.as_slice())
+    }
 }
 
 /// Render a footnote definition in a way that is safe inside `<span class="sidenote">…</span>`.

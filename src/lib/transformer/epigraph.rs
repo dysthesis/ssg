@@ -34,30 +34,17 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
     while i < events.len() {
         match &events[i] {
             Event::Start(Tag::BlockQuote(_)) => {
-                let mut buffer = Vec::new();
-                let mut nesting = 1;
-                i += 1;
-                while i < events.len() && nesting > 0 {
-                    match &events[i] {
-                        Event::Start(Tag::BlockQuote(_)) => nesting += 1,
-                        Event::End(TagEnd::BlockQuote(_)) => nesting -= 1,
-                        _ => {}
-                    }
-                    if nesting > 0 {
-                        buffer.push(events[i].clone());
-                        i += 1;
-                    }
-                }
+                let (block, consumed) = capture_blockquote(&events[i..]);
+                i += consumed;
 
-                if is_epigraph(&buffer) {
-                    render_epigraph(&mut out, buffer);
+                if let Some(epigraph) = block.and_then(EpigraphBlock::from_events) {
+                    render_epigraph(&mut out, epigraph);
                 } else {
+                    // Fallback: emit original blockquote content as-is
                     out.push(Event::Start(Tag::BlockQuote(None)));
-                    out.extend(buffer);
+                    out.extend(events[i - consumed + 1..i - 1].iter().cloned());
                     out.push(Event::End(TagEnd::BlockQuote(None)));
                 }
-
-                i += 1;
             }
             other => {
                 out.push(other.clone());
@@ -69,54 +56,85 @@ fn process_epigraphs<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
     out
 }
 
-fn is_epigraph(buffer: &[Event]) -> bool {
-    let last_para_start = buffer
-        .iter()
-        .rposition(|e| matches!(e, Event::Start(Tag::Paragraph)));
-
-    if let Some(idx) = last_para_start {
-        for event in &buffer[idx..] {
-            if let Event::Text(text) = event {
-                let s = text.trim();
-                return s.starts_with('—') || s.starts_with("--");
-            }
-        }
+/// Captures a blockquote starting at index 0; returns its inner events and items consumed.
+fn capture_blockquote<'a>(slice: &[Event<'a>]) -> (Option<Vec<Event<'a>>>, usize) {
+    if !matches!(slice.first(), Some(Event::Start(Tag::BlockQuote(_)))) {
+        return (None, 0);
     }
 
-    false
+    let mut buffer = Vec::new();
+    let mut nesting = 1;
+    let mut i = 1;
+    while i < slice.len() && nesting > 0 {
+        match &slice[i] {
+            Event::Start(Tag::BlockQuote(_)) => nesting += 1,
+            Event::End(TagEnd::BlockQuote(_)) => nesting -= 1,
+            _ => {}
+        }
+        if nesting > 0 {
+            buffer.push(slice[i].clone());
+        }
+        i += 1;
+    }
+
+    (Some(buffer), i)
 }
 
-fn render_epigraph<'a>(out: &mut Vec<Event<'a>>, buffer: Vec<Event<'a>>) {
+#[derive(Debug)]
+struct EpigraphBlock<'a> {
+    quote: Vec<Event<'a>>,
+    attribution: Vec<Event<'a>>,
+}
+
+impl<'a> EpigraphBlock<'a> {
+    fn from_events(events: Vec<Event<'a>>) -> Option<Self> {
+        let last_para_start = events
+            .iter()
+            .rposition(|e| matches!(e, Event::Start(Tag::Paragraph)))?;
+
+        let attribution = events[last_para_start..].to_vec();
+        let quote = events[..last_para_start].to_vec();
+
+        if !is_epigraph(&attribution) {
+            return None;
+        }
+
+        Some(Self { quote, attribution })
+    }
+}
+
+fn is_epigraph(buffer: &[Event]) -> bool {
+    buffer.iter().any(|event| {
+        if let Event::Text(text) = event {
+            let s = text.trim();
+            s.starts_with('—') || s.starts_with("--")
+        } else {
+            false
+        }
+    })
+}
+
+fn render_epigraph<'a>(out: &mut Vec<Event<'a>>, block: EpigraphBlock<'a>) {
     // Open container
     out.push(Event::Html(CowStr::from(r#"<div class="epigraph">"#)));
     out.push(Event::Html(CowStr::from("\n")));
 
-    let last_para_start = buffer
-        .iter()
-        .rposition(|e| matches!(e, Event::Start(Tag::Paragraph)))
-        .unwrap();
-
     // 1. Render the quote body
     out.push(Event::Html(CowStr::from(r#"<blockquote>"#)));
-    out.extend(buffer[0..last_para_start].iter().cloned());
+    out.extend(block.quote);
     out.push(Event::Html(CowStr::from(r#"</blockquote>"#)));
 
     // 2. Render the attribution
     out.push(Event::Html(CowStr::from(r#"<p class="attribution">"#)));
 
-    let attribution_content = &buffer[last_para_start..];
-
-    for event in attribution_content {
+    for event in block.attribution {
         match event {
-            Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph) => {
-                continue;
-            }
+            Event::Start(Tag::Paragraph) | Event::End(TagEnd::Paragraph) => continue,
             Event::Text(t) => {
                 let s = t.trim_start_matches('—').trim_start_matches('-');
-                // Convert the resulting String into a CowStr
                 out.push(Event::Text(CowStr::from(s.to_owned())));
             }
-            _ => out.push(event.clone()),
+            other => out.push(other),
         }
     }
 

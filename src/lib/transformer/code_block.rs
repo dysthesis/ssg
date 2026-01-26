@@ -10,7 +10,7 @@ use syntect::{
     parsing::{SyntaxReference, SyntaxSet},
 };
 
-use crate::transformer::Transformer;
+use crate::{transformer::Transformer, utils::escape_html};
 
 /// An enum to keep track of the state of the highlighter in the code block,
 /// `i.e.` whether or not we are in a code block, and whether or not we are
@@ -150,21 +150,6 @@ pub fn fallback_plain(source: &str, language: Option<&str>) -> String {
     out.push_str(&escape_html(source));
     out.push_str("</code></pre>\n");
     out
-}
-
-pub fn escape_html(raw: &str) -> String {
-    let mut escaped = String::with_capacity(raw.len());
-    for ch in raw.chars() {
-        match ch {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#x27;"),
-            _ => escaped.push(ch),
-        }
-    }
-    escaped
 }
 
 impl<'a, I> Transformer<'a, I> for CodeHighlightTransformer<'a, I>

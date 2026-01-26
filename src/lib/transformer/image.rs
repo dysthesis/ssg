@@ -1,7 +1,7 @@
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 use std::fmt::Write;
 
-use crate::transformer::Transformer;
+use crate::{transformer::Transformer, utils::escape_attr};
 
 pub struct ImageCaptionTransformer<I> {
     inner: I,
@@ -81,20 +81,4 @@ where
     fn transform(inner: I) -> Self {
         Self { inner }
     }
-}
-
-// Simple escaping helper for attributes
-fn escape_attr(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#x27;"),
-            _ => out.push(ch),
-        }
-    }
-    out
 }
