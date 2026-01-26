@@ -1,21 +1,21 @@
 use std::{collections::BTreeMap, fs, io, path::PathBuf};
 
-use color_eyre::{eyre::eyre, Section};
+use color_eyre::{Section, eyre::eyre};
 use itertools::{Either, Itertools};
-use minify_html::{minify, Cfg};
+use minify_html::{Cfg, minify};
 use pulldown_cmark::{Event, Options, Parser};
 use walkdir::{DirEntry, WalkDir};
 
 use crate::{
-    article::{render_listing_page, Article},
+    article::{Article, render_listing_page},
     config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
     css::build_css,
     header::Header,
     templates::page_shell,
     transformer::{
-        code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
+        WithTransformer, code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
         footnote::FootnoteTransformer, heading::HeadingDemoterTransformer,
-        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer, WithTransformer,
+        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer,
     },
     types::{Href, RelPath, Tag},
     utils::{escape_attr, prefix_to_root},

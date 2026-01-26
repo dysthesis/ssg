@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use proptest::{prelude::*, test_runner::{Config, TestRunner}};
+use proptest::{
+    prelude::*,
+    test_runner::{Config, TestRunner},
+};
 
 use crate::{
     article::Article,
@@ -10,7 +13,6 @@ use crate::{
 #[test]
 fn listing_groups_by_year() {
     let mut runner = TestRunner::new(Config {
-        cases: 16,
         failure_persistence: None,
         ..Config::default()
     });
@@ -25,12 +27,15 @@ fn listing_groups_by_year() {
                     articles.push(Article {
                         title: title.clone(),
                         ctime: Some(date),
-                        href: Href::from_rel(&RelPath::new(PathBuf::from(format!("{title}.html"))).unwrap()),
+                        href: Href::from_rel(
+                            &RelPath::new(PathBuf::from(format!("{title}.html"))).unwrap(),
+                        ),
                         tags: vec![],
                     });
                 }
                 articles.sort_by(|a, b| b.ctime.cmp(&a.ctime));
-                let body = crate::article::render_listing_page("Page", "Heading", &articles, "", "");
+                let body =
+                    crate::article::render_listing_page("Page", "Heading", &articles, "", "");
                 for a in &articles {
                     let year_str = a.ctime.as_ref().unwrap().year().to_string();
                     prop_assert!(body.contains(&year_str));

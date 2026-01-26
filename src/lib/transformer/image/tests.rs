@@ -1,20 +1,22 @@
-use proptest::{prelude::*, test_runner::{Config, TestRunner}};
+use proptest::{
+    prelude::*,
+    test_runner::{Config, TestRunner},
+};
 use pulldown_cmark::{CowStr, Event, LinkType, Tag, TagEnd};
 
-use crate::transformer::{image::ImageCaptionTransformer, WithTransformer};
+use crate::transformer::{WithTransformer, image::ImageCaptionTransformer};
 use crate::utils::escape_attr;
 
 #[test]
 fn image_caption_wraps_in_html() {
     let mut runner = TestRunner::new(Config {
-        cases: 16,
         failure_persistence: None,
         ..Config::default()
     });
 
     runner
         .run(
-            &( "https?://[A-Za-z0-9./_-]{1,24}", ".*", ".{1,20}" ),
+            &("https?://[A-Za-z0-9./_-]{1,24}", ".*", ".{1,20}"),
             |(dest, title, alt)| {
                 let events = vec![
                     Event::Start(Tag::Image {
@@ -27,7 +29,10 @@ fn image_caption_wraps_in_html() {
                     Event::End(TagEnd::Image),
                 ];
 
-                let out: Vec<_> = events.into_iter().with_transformer::<ImageCaptionTransformer<_>>().collect();
+                let out: Vec<_> = events
+                    .into_iter()
+                    .with_transformer::<ImageCaptionTransformer<_>>()
+                    .collect();
                 prop_assert_eq!(out.len(), 1);
                 match &out[0] {
                     Event::Html(html) => {
@@ -71,7 +76,10 @@ fn second_image_is_lazy_and_not_high_priority() {
         Event::End(TagEnd::Image),
     ];
 
-    let out: Vec<_> = events.into_iter().with_transformer::<ImageCaptionTransformer<_>>().collect();
+    let out: Vec<_> = events
+        .into_iter()
+        .with_transformer::<ImageCaptionTransformer<_>>()
+        .collect();
     assert_eq!(out.len(), 2);
 
     let second_html = match &out[1] {

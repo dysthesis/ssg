@@ -21,41 +21,44 @@ prop_compose! {
 #[test]
 fn iso_date_roundtrips() {
     let mut runner = TestRunner::new(Config {
-        cases: 32,
         failure_persistence: None,
         ..Config::default()
     });
     runner
-        .run(&(1970i32..=2100, 1u32..=12, 1u32..=28), |(year, month, day)| {
-            let s = format!("{year:04}-{month:02}-{day:02}");
-            let parsed = IsoDate::parse(&s).expect("valid date");
-            prop_assert_eq!(parsed.as_str(), s);
-            prop_assert_eq!(parsed.year(), year);
-            Ok(())
-        })
+        .run(
+            &(1970i32..=2100, 1u32..=12, 1u32..=28),
+            |(year, month, day)| {
+                let s = format!("{year:04}-{month:02}-{day:02}");
+                let parsed = IsoDate::parse(&s).expect("valid date");
+                prop_assert_eq!(parsed.as_str(), s);
+                prop_assert_eq!(parsed.year(), year);
+                Ok(())
+            },
+        )
         .unwrap();
 }
 
 #[test]
 fn iso_date_rejects_out_of_range() {
     let mut runner = TestRunner::new(Config {
-        cases: 16,
         failure_persistence: None,
         ..Config::default()
     });
     runner
-        .run(&(1970i32..=2100, 13u32..=99, 32u32..=99), |(year, month, day)| {
-            let s = format!("{year:04}-{month:02}-{day:02}");
-            prop_assert!(IsoDate::parse(&s).is_none());
-            Ok(())
-        })
+        .run(
+            &(1970i32..=2100, 13u32..=99, 32u32..=99),
+            |(year, month, day)| {
+                let s = format!("{year:04}-{month:02}-{day:02}");
+                prop_assert!(IsoDate::parse(&s).is_none());
+                Ok(())
+            },
+        )
         .unwrap();
 }
 
 #[test]
 fn tag_parse_accepts_valid() {
     let mut runner = TestRunner::new(Config {
-        cases: 32,
         failure_persistence: None,
         ..Config::default()
     });
@@ -71,17 +74,35 @@ fn tag_parse_accepts_valid() {
 #[test]
 fn tag_parse_rejects_invalid() {
     let mut runner = TestRunner::new(Config {
-        cases: 32,
         failure_persistence: None,
         ..Config::default()
     });
     let bad_chars = prop_oneof![
-        Just(" "), Just("!"), Just("@"), Just("#"), Just("$"), Just("%"), Just("^"), Just("&"),
-        Just("*"), Just("+"), Just("="), Just("?"), Just(","), Just(";"), Just(":"), Just("/"), Just(".")
+        Just(" "),
+        Just("!"),
+        Just("@"),
+        Just("#"),
+        Just("$"),
+        Just("%"),
+        Just("^"),
+        Just("&"),
+        Just("*"),
+        Just("+"),
+        Just("="),
+        Just("?"),
+        Just(","),
+        Just(";"),
+        Just(":"),
+        Just("/"),
+        Just(".")
     ];
     runner
         .run(
-            &(string_regex("[\\p{Alphabetic}\\p{Number}_-]{0,6}").unwrap(), bad_chars, string_regex("[\\p{Alphabetic}\\p{Number}_-]{0,6}").unwrap()),
+            &(
+                string_regex("[\\p{Alphabetic}\\p{Number}_-]{0,6}").unwrap(),
+                bad_chars,
+                string_regex("[\\p{Alphabetic}\\p{Number}_-]{0,6}").unwrap(),
+            ),
             |(prefix, bad, suffix)| {
                 let s = format!("{prefix}{bad}{suffix}");
                 prop_assert!(Tag::parse(&s).is_none());
@@ -94,7 +115,6 @@ fn tag_parse_rejects_invalid() {
 #[test]
 fn rel_path_accepts_relative() {
     let mut runner = TestRunner::new(Config {
-        cases: 16,
         failure_persistence: None,
         ..Config::default()
     });
@@ -118,7 +138,6 @@ fn rel_path_rejects_absolute() {
 #[test]
 fn href_uses_forward_slashes() {
     let mut runner = TestRunner::new(Config {
-        cases: 16,
         failure_persistence: None,
         ..Config::default()
     });

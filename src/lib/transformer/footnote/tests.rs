@@ -17,5 +17,8 @@ fn footnote_transformer_inlines_definition() {
 
     assert!(out.iter().any(|e| matches!(e, Event::InlineHtml(_))));
     assert!(!out.iter().any(|e| matches!(e, Event::FootnoteReference(_))));
-    assert!(!out.iter().any(|e| matches!(e, Event::Start(Tag::FootnoteDefinition(_)))));
+    assert!(
+        !out.iter()
+            .any(|e| matches!(e, Event::Start(Tag::FootnoteDefinition(_))))
+    );
 }

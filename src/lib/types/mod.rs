@@ -6,7 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use time::{format_description, Date};
+use time::{Date, format_description};
 
 /// Date format used for mtime and ctime.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

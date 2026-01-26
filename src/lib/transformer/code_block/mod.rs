@@ -60,56 +60,50 @@ where
                     // All other events pass through unchanged
                     other => return Some(other),
                 },
-                CodeBlockState::Accumulating { lang: _ } => {
-                    match event {
-                        Event::End(TagEnd::CodeBlock) => {
-                            let CodeBlockState::Accumulating { lang } =
-                                std::mem::replace(&mut self.state, CodeBlockState::Passthrough)
-                            else {
-                                unreachable!()
-                            };
+                CodeBlockState::Accumulating { lang: _ } => match event {
+                    Event::End(TagEnd::CodeBlock) => {
+                        let CodeBlockState::Accumulating { lang } =
+                            std::mem::replace(&mut self.state, CodeBlockState::Passthrough)
+                        else {
+                            unreachable!()
+                        };
 
-                            let language = match lang {
-                                CodeBlockKind::Fenced(ref l) => Some(l.as_ref()),
-                                CodeBlockKind::Indented => None,
-                            };
+                        let language = match lang {
+                            CodeBlockKind::Fenced(ref l) => Some(l.as_ref()),
+                            CodeBlockKind::Indented => None,
+                        };
 
-                            let syntax_set = syntax_set();
-                            let theme = theme();
+                        let syntax_set = syntax_set();
+                        let theme = theme();
 
-                            let syntax: &SyntaxReference = language
-                                .and_then(|lang| syntax_set.find_syntax_by_token(lang))
-                                .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
+                        let syntax: &SyntaxReference = language
+                            .and_then(|lang| syntax_set.find_syntax_by_token(lang))
+                            .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
 
-                            let rendered = highlighted_html_for_string(
-                                &self.buffer,
-                                syntax_set,
-                                syntax,
-                                &theme,
-                            )
-                            .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
+                        let rendered =
+                            highlighted_html_for_string(&self.buffer, syntax_set, syntax, &theme)
+                                .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
 
-                            return Some(Event::Html(CowStr::from(rendered)));
-                        }
-                        Event::Text(text) | Event::Code(text) => {
-                            self.buffer.push_str(text.as_ref());
-                            continue;
-                        }
-                        Event::SoftBreak | Event::HardBreak => {
-                            self.buffer.push('\n');
-                            continue;
-                        }
-                        Event::Html(html) | Event::InlineHtml(html) => {
-                            self.buffer.push_str(html.as_ref());
-                            continue;
-                        }
-                        Event::InlineMath(math) | Event::DisplayMath(math) => {
-                            self.buffer.push_str(math.as_ref());
-                            continue;
-                        }
-                        _ => continue,
+                        return Some(Event::Html(CowStr::from(rendered)));
                     }
-                }
+                    Event::Text(text) | Event::Code(text) => {
+                        self.buffer.push_str(text.as_ref());
+                        continue;
+                    }
+                    Event::SoftBreak | Event::HardBreak => {
+                        self.buffer.push('\n');
+                        continue;
+                    }
+                    Event::Html(html) | Event::InlineHtml(html) => {
+                        self.buffer.push_str(html.as_ref());
+                        continue;
+                    }
+                    Event::InlineMath(math) | Event::DisplayMath(math) => {
+                        self.buffer.push_str(math.as_ref());
+                        continue;
+                    }
+                    _ => continue,
+                },
             }
         }
     }

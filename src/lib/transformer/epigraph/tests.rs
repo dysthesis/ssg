@@ -1,6 +1,6 @@
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 
-use crate::transformer::{epigraph::EpigraphTransformer, Transformer};
+use crate::transformer::{Transformer, epigraph::EpigraphTransformer};
 
 #[test]
 fn epigraph_transformer_detects_final_attribution() {

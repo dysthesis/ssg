@@ -11,7 +11,6 @@ use crate::{transformer::toc::insert_toc_and_heading_ids, utils::slugify};
 #[test]
 fn toc_assigns_unique_ids() {
     let mut runner = TestRunner::new(Config {
-        cases: 16,
         failure_persistence: None,
         ..Config::default()
     });
@@ -22,7 +21,12 @@ fn toc_assigns_unique_ids() {
             |headings| {
                 let mut events = Vec::new();
                 for title in &headings {
-                    events.push(Event::Start(Tag::Heading { level: HeadingLevel::H2, id: None, classes: vec![], attrs: vec![] }));
+                    events.push(Event::Start(Tag::Heading {
+                        level: HeadingLevel::H2,
+                        id: None,
+                        classes: vec![],
+                        attrs: vec![],
+                    }));
                     events.push(Event::Text(CowStr::from(title.clone())));
                     events.push(Event::End(TagEnd::Heading(HeadingLevel::H2)));
                 }
@@ -31,7 +35,12 @@ fn toc_assigns_unique_ids() {
 
                 let mut ids = Vec::new();
                 for ev in &out {
-                    if let Event::Start(Tag::Heading { level: HeadingLevel::H2, id: Some(id), .. }) = ev {
+                    if let Event::Start(Tag::Heading {
+                        level: HeadingLevel::H2,
+                        id: Some(id),
+                        ..
+                    }) = ev
+                    {
                         ids.push(id.to_string());
                     }
                 }
@@ -45,7 +54,11 @@ fn toc_assigns_unique_ids() {
                     let slug = slugify(title);
                     let entry = counts.entry(slug.clone()).or_insert(0);
                     *entry += 1;
-                    let expected = if *entry == 1 { slug.clone() } else { format!("{slug}-{}", *entry) };
+                    let expected = if *entry == 1 {
+                        slug.clone()
+                    } else {
+                        format!("{slug}-{}", *entry)
+                    };
                     prop_assert_eq!(id, &expected);
                 }
 
