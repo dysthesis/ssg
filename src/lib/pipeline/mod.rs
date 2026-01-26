@@ -215,6 +215,10 @@ fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<Rend
         let mut rendered = String::new();
         pulldown_cmark::html::push_html(&mut rendered, transformed);
 
+        // Capture the rendered article body (including header) for full-text feeds before adding
+        // any extra navigation links that are only relevant on-page.
+        let feed_content_html = format!("{body_header}{rendered}");
+
         rendered.push_str(&format!(
             r#"
 <p class="meta"><a href="{0}index.html">Index</a></p>
@@ -234,6 +238,7 @@ fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<Rend
             ctime: header.ctime(),
             updated: header.mtime(),
             summary,
+            content_html: feed_content_html,
             href,
             tags: header.tags().0,
         };

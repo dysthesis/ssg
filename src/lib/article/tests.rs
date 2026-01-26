@@ -29,6 +29,7 @@ fn listing_groups_by_year() {
                         ctime: Some(date),
                         updated: None,
                         summary: None,
+                        content_html: String::new(),
                         href: Href::from_rel(
                             &RelPath::new(PathBuf::from(format!("{title}.html"))).unwrap(),
                         ),

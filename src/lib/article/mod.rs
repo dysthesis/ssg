@@ -9,6 +9,8 @@ pub struct Article {
     pub ctime: Option<IsoDate>,
     pub updated: Option<IsoDate>,
     pub summary: Option<String>,
+    /// Raw HTML for the article body (including header metadata) used for full-text feeds.
+    pub content_html: String,
     pub href: Href,
     pub tags: Vec<Tag>,
 }

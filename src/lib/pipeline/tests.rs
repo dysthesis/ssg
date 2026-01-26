@@ -282,6 +282,15 @@ fn feeds_are_emitted_and_sorted_with_absolute_links() {
             .starts_with(SITE_BASE_URL.trim_end_matches('/'))
     );
     assert_eq!(channel.items()[0].description(), Some("Summary here"));
+    let content = channel.items()[0].content().expect("rss content");
+    assert!(
+        content.contains("<p>Body</p>"),
+        "RSS content should include full body HTML"
+    );
+    assert!(
+        content.contains("<h1>Newer</h1>"),
+        "RSS content should include the article header"
+    );
     let categories: Vec<_> = channel.items()[0]
         .categories()
         .iter()
@@ -303,8 +312,20 @@ fn feeds_are_emitted_and_sorted_with_absolute_links() {
             .starts_with(SITE_BASE_URL.trim_end_matches('/'))
     );
     assert_eq!(
-        feed.entries()[0].content().as_ref().and_then(|c| c.value()),
+        feed.entries()[0].summary().map(|s| s.as_str()),
         Some("Summary here")
+    );
+    let atom_content = feed.entries()[0]
+        .content()
+        .and_then(|c| c.value())
+        .expect("atom content");
+    assert!(
+        atom_content.contains("<p>Body</p>"),
+        "Atom content should include full body HTML"
+    );
+    assert!(
+        atom_content.contains("<h1>Newer</h1>"),
+        "Atom content should include the article header"
     );
     let atom_cats: Vec<_> = feed.entries()[0]
         .categories()

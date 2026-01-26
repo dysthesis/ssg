@@ -48,6 +48,7 @@ struct FeedEntry {
     title: String,
     url: String,
     summary: Option<String>,
+    content_html: String,
     tags: Vec<Tag>,
     published: Option<IsoDate>,
     updated: Option<IsoDate>,
@@ -62,6 +63,7 @@ impl FeedEntry {
             title: article.title.clone(),
             url,
             summary: article.summary.clone(),
+            content_html: article.content_html.clone(),
             tags: article.tags.clone(),
             published: article.ctime.clone(),
             updated: article.updated.clone().or_else(|| article.ctime.clone()),
@@ -92,6 +94,9 @@ fn build_rss(entries: &[FeedEntry], meta: &SiteMeta) -> color_eyre::Result<Strin
         if let Some(summary) = &entry.summary {
             item.set_description(Some(summary.clone()));
         }
+
+        // Embed full HTML so the RSS feed is full-text.
+        item.set_content(Some(entry.content_html.clone()));
 
         if !entry.tags.is_empty() {
             let cats: Vec<Category> = entry
@@ -157,11 +162,14 @@ fn build_atom(entries: &[FeedEntry], meta: &SiteMeta) -> color_eyre::Result<Stri
         e.set_links(vec![link]);
 
         if let Some(summary) = &entry.summary {
-            let mut content = atom_syndication::Content::default();
-            content.set_content_type(Some("html".into()));
-            content.set_value(Some(summary.clone()));
-            e.set_content(Some(content));
+            e.set_summary(Some(atom_syndication::Text::html(summary.clone())));
         }
+
+        // Full-text content for Atom consumers.
+        let mut content = atom_syndication::Content::default();
+        content.set_content_type(Some("html".into()));
+        content.set_value(Some(entry.content_html.clone()));
+        e.set_content(Some(content));
 
         if !entry.tags.is_empty() {
             let categories: Vec<atom_syndication::Category> = entry
