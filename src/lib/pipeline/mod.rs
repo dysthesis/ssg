@@ -22,8 +22,9 @@ use crate::{
     templates::page_shell,
     transformer::{
         code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
-        footnote::FootnoteTransformer, heading::HeadingDemoterTransformer,
-        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer, WithTransformer,
+        footnote::{FootnoteTransformer, PlainFootnoteTransformer},
+        heading::HeadingDemoterTransformer, image::ImageCaptionTransformer, math::MathTransformer,
+        toc::TocTransformer, WithTransformer,
     },
     types::{Href, RelPath, Tag},
     utils::{escape_attr, prefix_to_root},
@@ -215,25 +216,15 @@ fn render_single(
     let mut head_fragment = header.to_html(&css_href, has_math, &katex_href);
     head_fragment.push_str(&header.opengraph_meta(&page_url, &ctx.site_meta));
 
-    // Apply transformers
-    let transformed = events
-        .into_iter()
-        .with_transformer::<EpigraphTransformer<'_>>()
-        .with_transformer::<CodeHighlightTransformer<'_, _>>()
-        .with_transformer::<MathTransformer<'_, _>>()
-        .with_transformer::<FootnoteTransformer<'_>>()
-        .with_transformer::<HeadingDemoterTransformer<'_, _>>()
-        .with_transformer::<TocTransformer<'_>>()
-        .with_transformer::<ImageCaptionTransformer<_>>();
-
-    let mut rendered = String::new();
-    pulldown_cmark::html::push_html(&mut rendered, transformed);
+    let page_body = render_page_body(events.clone());
+    let feed_body = render_feed_body(events);
 
     // Capture the rendered article body (including header) for full-text feeds before adding
     // any extra navigation links that are only relevant on-page.
-    let feed_content_html = format!("{body_header}{rendered}");
+    let feed_content_html = format!("{body_header}{feed_body}");
 
-    rendered.push_str(&format!(
+    let mut page_body_with_nav = page_body;
+    page_body_with_nav.push_str(&format!(
         r#"
 <p class="meta"><a href="{0}index.html">Index</a></p>
 "#,
@@ -261,7 +252,7 @@ fn render_single(
         &ctx.head_html,
         &head_fragment,
         &body_header,
-        &rendered,
+        &page_body_with_nav,
         &ctx.footer_html,
     );
     let minified = minify(page_html.as_bytes(), &ctx.min_cfg);
@@ -273,6 +264,38 @@ fn render_single(
         },
         article,
     ))
+}
+
+fn render_page_body<'a>(events: Vec<Event<'a>>) -> String {
+    let transformed = events
+        .into_iter()
+        .with_transformer::<EpigraphTransformer<'_>>()
+        .with_transformer::<CodeHighlightTransformer<'_, _>>()
+        .with_transformer::<MathTransformer<'_, _>>()
+        .with_transformer::<FootnoteTransformer<'_>>()
+        .with_transformer::<HeadingDemoterTransformer<'_, _>>()
+        .with_transformer::<TocTransformer<'_>>()
+        .with_transformer::<ImageCaptionTransformer<_>>();
+
+    let mut rendered = String::new();
+    pulldown_cmark::html::push_html(&mut rendered, transformed);
+    rendered
+}
+
+fn render_feed_body<'a>(events: Vec<Event<'a>>) -> String {
+    let transformed = events
+        .into_iter()
+        .with_transformer::<EpigraphTransformer<'_>>()
+        .with_transformer::<CodeHighlightTransformer<'_, _>>()
+        .with_transformer::<MathTransformer<'_, _>>()
+        .with_transformer::<PlainFootnoteTransformer<'_>>()
+        .with_transformer::<HeadingDemoterTransformer<'_, _>>()
+        .with_transformer::<TocTransformer<'_>>()
+        .with_transformer::<ImageCaptionTransformer<_>>();
+
+    let mut rendered = String::new();
+    pulldown_cmark::html::push_html(&mut rendered, transformed);
+    rendered
 }
 
 fn emit_docs(

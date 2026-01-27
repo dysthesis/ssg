@@ -336,6 +336,36 @@ fn feeds_are_emitted_and_sorted_with_absolute_links() {
 }
 
 #[test]
+fn feeds_render_plain_footnotes() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    fs::create_dir_all(INPUT_DIR).unwrap();
+    fs::write("style.css", "body { color: black; }").unwrap();
+
+    let md = r#"---
+title: Footy
+ctime: 2025-04-04
+---
+Body with footnote[^1].
+
+[^1]: This is the footnote, rendered plainly.
+"#;
+    write_md(tmp.path(), Path::new("note.md"), md).unwrap();
+
+    build_at(tmp.path()).unwrap();
+
+    let rss_bytes = read_public_bytes(&tmp, Path::new("rss.xml"));
+    let channel = rss::Channel::read_from(&rss_bytes[..]).expect("parse rss");
+    let content = channel.items()[0].content().expect("rss content");
+
+    assert!(content.contains(r#"<sup id="fnref-1""#));
+    assert!(content.contains(r#"<section class="footnotes""#));
+    assert!(content.contains("This is the footnote"));
+    assert!(!content.contains("margin-toggle"));
+    assert!(!content.contains("sidenote"));
+}
+
+#[test]
 fn article_pages_include_opengraph_meta_with_absolute_urls() {
     let tmp = TempDir::new().expect("tempdir");
 

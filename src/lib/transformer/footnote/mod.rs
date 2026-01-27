@@ -1,6 +1,6 @@
 use crate::transformer::Transformer;
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Write as _};
 
 pub struct FootnoteTransformer<'a> {
     inner: std::vec::IntoIter<Event<'a>>,
@@ -21,6 +21,32 @@ where
     fn transform(inner: I) -> Self {
         let events: Vec<Event<'a>> = inner.collect();
         let rewritten = convert_footnotes_to_sidenotes(events);
+        Self {
+            inner: rewritten.into_iter(),
+        }
+    }
+}
+
+/// Render footnotes as simple superscripts with an appended ordered list.
+pub struct PlainFootnoteTransformer<'a> {
+    inner: std::vec::IntoIter<Event<'a>>,
+}
+
+impl<'a> Iterator for PlainFootnoteTransformer<'a> {
+    type Item = Event<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+impl<'a, I> Transformer<'a, I> for PlainFootnoteTransformer<'a>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    fn transform(inner: I) -> Self {
+        let events: Vec<Event<'a>> = inner.collect();
+        let rewritten = convert_footnotes_to_plain_list(events);
         Self {
             inner: rewritten.into_iter(),
         }
@@ -71,6 +97,76 @@ pub fn convert_footnotes_to_sidenotes<'a>(events: Vec<Event<'a>>) -> Vec<Event<'
         }
     }
 
+    out
+}
+
+/// Convert footnotes into bare HTML that reads correctly without CSS.
+pub fn convert_footnotes_to_plain_list<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
+    let defs = FootnoteDefinitions::collect(&events);
+    let mut out: Vec<Event<'a>> = Vec::with_capacity(events.len() + 8);
+
+    let mut skipping_definition_depth: usize = 0;
+    let mut ordered_labels: Vec<String> = Vec::new();
+
+    let mut note_number = |label: &str| -> usize {
+        if let Some(idx) = ordered_labels.iter().position(|l| l == label) {
+            idx + 1
+        } else {
+            ordered_labels.push(label.to_string());
+            ordered_labels.len()
+        }
+    };
+
+    for event in events {
+        if skipping_definition_depth > 0 {
+            match event {
+                Event::Start(_) => skipping_definition_depth += 1,
+                Event::End(_) => {
+                    skipping_definition_depth = skipping_definition_depth.saturating_sub(1)
+                }
+                _ => {}
+            }
+            continue;
+        }
+
+        match event {
+            Event::Start(Tag::FootnoteDefinition(_label)) => {
+                skipping_definition_depth = 1;
+            }
+
+            Event::FootnoteReference(label) => {
+                let num = note_number(label.as_ref());
+                let html = format!(
+                    "<sup id=\"fnref-{num}\" class=\"footnote-ref\"><a href=\"#fn-{num}\">{num}</a></sup>"
+                );
+                out.push(Event::InlineHtml(CowStr::from(html)));
+            }
+
+            other => out.push(other),
+        }
+    }
+
+    if ordered_labels.is_empty() {
+        return out;
+    }
+
+    let mut list_html = String::new();
+    list_html.push_str(r#"<section class="footnotes" aria-label="Footnotes">"#);
+    list_html.push_str("<hr><ol>");
+    for (idx, label) in ordered_labels.iter().enumerate() {
+        let num = idx + 1;
+        let def_events = defs.get(label.as_str()).unwrap_or(&[]);
+        let def_html = render_definition_as_block_html(def_events);
+        let _ = write!(
+            &mut list_html,
+            "<li id=\"fn-{num}\">{def_html} <a href=\"#fnref-{num}\" class=\"footnote-backref\">↩</a></li>",
+            num = num,
+            def_html = def_html
+        );
+    }
+    list_html.push_str("</ol></section>");
+
+    out.push(Event::Html(CowStr::from(list_html)));
     out
 }
 
@@ -128,6 +224,12 @@ fn render_definition_as_inline_html<'a>(events: &[Event<'a>]) -> String {
     let mut html = String::new();
     pulldown_cmark::html::push_html(&mut html, inline_events.into_iter());
 
+    html.trim().to_string()
+}
+
+fn render_definition_as_block_html<'a>(events: &[Event<'a>]) -> String {
+    let mut html = String::new();
+    pulldown_cmark::html::push_html(&mut html, events.iter().cloned());
     html.trim().to_string()
 }
 
