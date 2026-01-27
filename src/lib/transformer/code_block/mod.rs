@@ -5,7 +5,7 @@ use std::{
 
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag, TagEnd};
 use syntect::{
-    highlighting::ThemeSet,
+    highlighting::{Theme, ThemeSet},
     html::highlighted_html_for_string,
     parsing::{SyntaxReference, SyntaxSet},
 };
@@ -79,10 +79,13 @@ where
                             .and_then(|lang| syntax_set.find_syntax_by_token(lang))
                             .unwrap_or_else(|| syntax_set.find_syntax_plain_text());
 
-                        let theme = theme();
-                        let rendered =
-                            highlighted_html_for_string(&self.buffer, syntax_set, syntax, &theme)
-                                .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
+                        let rendered = highlighted_html_for_string(
+                            &self.buffer,
+                            syntax_set,
+                            syntax,
+                            theme(),
+                        )
+                        .unwrap_or_else(|_| fallback_plain(&self.buffer, language));
 
                         return Some(Event::Html(CowStr::from(rendered)));
                     }
@@ -114,11 +117,16 @@ fn syntax_set() -> &'static SyntaxSet {
     SYNTAX_SET.get_or_init(SyntaxSet::load_defaults_newlines)
 }
 
-fn theme() -> syntect::highlighting::Theme {
-    let raw_theme = include_bytes!("../../../../assets/theme.tmTheme");
-    let cursor = Cursor::new(raw_theme);
-    let mut reader = BufReader::new(cursor);
-    ThemeSet::load_from_reader(&mut reader).unwrap_or_default()
+// Parsing the theme file is moderately expensive; cache it so each code block
+// highlights without reloading the theme.
+static THEME: OnceLock<Theme> = OnceLock::new();
+fn theme() -> &'static Theme {
+    THEME.get_or_init(|| {
+        let raw_theme = include_bytes!("../../../../assets/theme.tmTheme");
+        let cursor = Cursor::new(raw_theme);
+        let mut reader = BufReader::new(cursor);
+        ThemeSet::load_from_reader(&mut reader).unwrap_or_default()
+    })
 }
 
 /// Backup renderer in case syntect fails for whatever reason

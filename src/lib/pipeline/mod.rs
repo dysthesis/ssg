@@ -10,6 +10,7 @@ use color_eyre::{Section, eyre::eyre};
 use flate2::{Compression, write::GzEncoder};
 use minify_html::{Cfg, minify};
 use pulldown_cmark::{Event, Options, Parser};
+use rayon::prelude::*;
 use walkdir::WalkDir;
 
 use crate::{
@@ -294,20 +295,34 @@ fn emit_docs(
 fn precompress_outputs(output_dir: &Path) -> color_eyre::Result<()> {
     const TARGET_EXTS: &[&str] = &["html", "css", "xml", "js", "json"];
 
-    for entry in WalkDir::new(output_dir).into_iter().filter_map(Result::ok) {
-        if !entry.file_type().is_file() {
-            continue;
-        }
+    let files: Vec<_> = WalkDir::new(output_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|ext| TARGET_EXTS.contains(&ext))
+                    .unwrap_or(false)
+        })
+        .map(|entry| entry.path().to_owned())
+        .collect();
 
-        let path = entry.path();
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        if !TARGET_EXTS.contains(&ext) {
-            continue;
+    if files.len() < 32 {
+        for path in files {
+            let data = fs::read(&path)?;
+            write_gzip_variant(&path, &data)?;
+            write_brotli_variant(&path, &data)?;
         }
-
-        let data = fs::read(path)?;
-        write_gzip_variant(path, &data)?;
-        write_brotli_variant(path, &data)?;
+    } else {
+        files.par_iter().try_for_each(|path| -> color_eyre::Result<()> {
+            let data = fs::read(path)?;
+            write_gzip_variant(path, &data)?;
+            write_brotli_variant(path, &data)?;
+            Ok(())
+        })?;
     }
 
     Ok(())
@@ -335,7 +350,9 @@ fn write_brotli_variant(path: &Path, data: &[u8]) -> io::Result<()> {
             .unwrap_or_default()
     ));
 
-    let mut writer = CompressorWriter::new(Vec::new(), 4096, 11, 22);
+    // Use a balanced quality level: q6 keeps strong compression while avoiding
+    // the very slow q11 default.
+    let mut writer = CompressorWriter::new(Vec::new(), 4096, 6, 22);
     writer.write_all(data)?;
     let compressed = writer.into_inner();
     fs::write(out_path, compressed)

@@ -2497,6 +2497,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "pulldown-cmark",
+ "rayon",
  "rss",
  "serde",
  "syntect",

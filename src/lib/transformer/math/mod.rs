@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use katex::Opts;
 use pulldown_cmark::{CowStr, Event};
 
@@ -32,13 +34,28 @@ where
     }
 }
 
+fn inline_opts() -> &'static Opts {
+    static INLINE: OnceLock<Opts> = OnceLock::new();
+    INLINE.get_or_init(|| {
+        let mut builder = Opts::builder();
+        builder.display_mode(false);
+        builder.build().unwrap_or_default()
+    })
+}
+
+fn display_opts() -> &'static Opts {
+    static DISPLAY: OnceLock<Opts> = OnceLock::new();
+    DISPLAY.get_or_init(|| {
+        let mut builder = Opts::builder();
+        builder.display_mode(true);
+        builder.build().unwrap_or_default()
+    })
+}
+
 fn render_math(source: &str, display_mode: bool) -> String {
-    let mut builder = Opts::builder();
-    builder.display_mode(display_mode);
+    let opts = if display_mode { display_opts() } else { inline_opts() };
 
-    let opts = builder.build().unwrap_or_default();
-
-    match katex::render_with_opts(source, &opts) {
+    match katex::render_with_opts(source, opts) {
         Ok(res) => res,
         Err(_) => source.to_string(),
     }
