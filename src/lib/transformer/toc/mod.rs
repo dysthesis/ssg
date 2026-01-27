@@ -9,7 +9,19 @@ pub struct TocTransformer<'a> {
     inner: std::vec::IntoIter<Event<'a>>,
 }
 
+pub struct FeedTocTransformer<'a> {
+    inner: std::vec::IntoIter<Event<'a>>,
+}
+
 impl<'a> Iterator for TocTransformer<'a> {
+    type Item = Event<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.inner.next()
+    }
+}
+
+impl<'a> Iterator for FeedTocTransformer<'a> {
     type Item = Event<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -30,6 +42,19 @@ where
     }
 }
 
+impl<'a, I> Transformer<'a, I> for FeedTocTransformer<'a>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    fn transform(inner: I) -> Self {
+        let events: Vec<Event<'a>> = inner.collect();
+        let rewritten = insert_feed_toc_and_heading_ids(events);
+        Self {
+            inner: rewritten.into_iter(),
+        }
+    }
+}
+
 /// Insert a margin TOC (based on h2 and h3) and assign ids to headings when absent.
 pub fn insert_toc_and_heading_ids<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
     let TocExtraction {
@@ -42,6 +67,24 @@ pub fn insert_toc_and_heading_ids<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> 
     }
 
     let toc_html = build_toc_html(&headings);
+    let mut final_out: Vec<Event<'a>> = Vec::with_capacity(body.len() + 1);
+    final_out.push(Event::Html(CowStr::from(toc_html)));
+    final_out.extend(body);
+    final_out
+}
+
+/// Feed-friendly TOC: no numbering, simple lists, and a proper heading.
+pub fn insert_feed_toc_and_heading_ids<'a>(events: Vec<Event<'a>>) -> Vec<Event<'a>> {
+    let TocExtraction {
+        events: body,
+        headings,
+    } = extract_headings(events);
+
+    if headings.is_empty() {
+        return body;
+    }
+
+    let toc_html = build_feed_toc_html(&headings);
     let mut final_out: Vec<Event<'a>> = Vec::with_capacity(body.len() + 1);
     final_out.push(Event::Html(CowStr::from(toc_html)));
     final_out.extend(body);
@@ -145,6 +188,76 @@ fn build_toc_html(headings: &[HeadingEntry]) -> String {
 
     s.push_str("</ol></nav>");
     s.push_str("</div>");
+    s
+}
+
+fn build_feed_toc_html(headings: &[HeadingEntry]) -> String {
+    use std::fmt::Write as _;
+
+    let mut h2_open = false;
+    let mut sub_open = false;
+
+    let mut s = String::new();
+    s.push_str(r#"<h1 id="contents">Contents</h1>"#);
+    s.push_str("<ul>");
+
+    for (i, entry) in headings.iter().enumerate() {
+        let next_level = headings.get(i + 1).map(|h| h.level);
+
+        if matches!(entry.level, HeadingLevel::H2) {
+            if h2_open {
+                if sub_open {
+                    s.push_str("</ul>");
+                    sub_open = false;
+                }
+                s.push_str("</li>");
+            }
+
+            h2_open = true;
+            write!(
+                &mut s,
+                "<li><a href=\"#{id}\">",
+                id = escape_attr(&entry.id)
+            )
+            .unwrap();
+            s.push_str(&escape_text(&entry.title));
+            s.push_str("</a>");
+
+            if matches!(next_level, Some(HeadingLevel::H3)) {
+                s.push_str("<ul>");
+                sub_open = true;
+            }
+        } else if matches!(entry.level, HeadingLevel::H3) {
+            if !h2_open {
+                // stray h3, render as h2-level item
+                write!(
+                    &mut s,
+                    "<li><a href=\"#{id}\">{title}</a></li>",
+                    id = escape_attr(&entry.id),
+                    title = escape_text(&entry.title)
+                )
+                .unwrap();
+                continue;
+            }
+
+            write!(
+                &mut s,
+                "<li><a href=\"#{id}\">{title}</a></li>",
+                id = escape_attr(&entry.id),
+                title = escape_text(&entry.title)
+            )
+            .unwrap();
+        }
+    }
+
+    if h2_open {
+        if sub_open {
+            s.push_str("</ul>");
+        }
+        s.push_str("</li>");
+    }
+
+    s.push_str("</ul>");
     s
 }
 

@@ -10,7 +10,10 @@ use syntect::{
     parsing::{SyntaxReference, SyntaxSet},
 };
 
-use crate::{transformer::Transformer, utils::escape_html};
+use crate::{
+    transformer::Transformer,
+    utils::{escape_attr, escape_html},
+};
 
 /// An enum to keep track of the state of the highlighter in the code block.
 pub enum CodeBlockState<'a> {
@@ -159,3 +162,94 @@ where
 
 #[cfg(test)]
 mod tests;
+
+/// Feed-friendly renderer that preserves language metadata without CSS-dependent markup.
+pub struct FeedCodeLabelTransformer<'a, I>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    inner: I,
+    buffer: String,
+    state: CodeBlockState<'a>,
+}
+
+impl<'a, I> Iterator for FeedCodeLabelTransformer<'a, I>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    type Item = Event<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let event = self.inner.next()?;
+            match &self.state {
+                CodeBlockState::Passthrough => match event {
+                    Event::Start(Tag::CodeBlock(lang)) => {
+                        self.state = CodeBlockState::Accumulating { lang };
+                        self.buffer.clear();
+                        continue;
+                    }
+                    other => return Some(other),
+                },
+                CodeBlockState::Accumulating { lang: _ } => match event {
+                    Event::End(TagEnd::CodeBlock) => {
+                        let CodeBlockState::Accumulating { lang } =
+                            std::mem::replace(&mut self.state, CodeBlockState::Passthrough)
+                        else {
+                            unreachable!()
+                        };
+
+                        let language = match lang {
+                            CodeBlockKind::Fenced(ref l) => Some(l.as_ref()),
+                            CodeBlockKind::Indented => None,
+                        };
+
+                        let class_attr = language
+                            .map(|l| format!(" class=\"language-{}\"", escape_attr(l)))
+                            .unwrap_or_default();
+                        let data_attr = language
+                            .map(|l| format!(" data-lang=\"{}\"", escape_attr(l)))
+                            .unwrap_or_default();
+
+                        let rendered = format!(
+                            "<pre><code{class_attr}{data_attr}>{}</code></pre>\n",
+                            escape_html(&self.buffer)
+                        );
+
+                        return Some(Event::Html(CowStr::from(rendered)));
+                    }
+                    Event::Text(text) | Event::Code(text) => {
+                        self.buffer.push_str(text.as_ref());
+                        continue;
+                    }
+                    Event::SoftBreak | Event::HardBreak => {
+                        self.buffer.push('\n');
+                        continue;
+                    }
+                    Event::Html(html) | Event::InlineHtml(html) => {
+                        self.buffer.push_str(html.as_ref());
+                        continue;
+                    }
+                    Event::InlineMath(math) | Event::DisplayMath(math) => {
+                        self.buffer.push_str(math.as_ref());
+                        continue;
+                    }
+                    _ => continue,
+                },
+            }
+        }
+    }
+}
+
+impl<'a, I> Transformer<'a, I> for FeedCodeLabelTransformer<'a, I>
+where
+    I: Iterator<Item = Event<'a>>,
+{
+    fn transform(inner: I) -> Self {
+        Self {
+            inner,
+            buffer: String::new(),
+            state: CodeBlockState::Passthrough,
+        }
+    }
+}

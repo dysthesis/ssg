@@ -202,6 +202,24 @@ impl Header {
         result
     }
 
+    /// Simplified header for feeds: keep title/subtitle, drop on-page navigation and meta rows
+    /// that add noise in RSS/Atom readers.
+    pub fn generate_feed_body_head(&self) -> String {
+        let mut result = String::new();
+
+        if let Some(title) = self.title.as_ref() {
+            result.push_str(&format!(r#"<h1>{}</h1>
+"#, escape_text(title)));
+        }
+
+        if let Some(sub) = self.subtitle.as_ref() {
+            result.push_str(&format!(r#"<p class="subtitle">{}</p>
+"#, escape_text(sub)));
+        }
+
+        result
+    }
+
     fn render_body_meta(&self, href_prefix: &str) -> String {
         let has_any = self.ctime.is_some() || self.mtime.is_some() || !self.tags().is_empty();
 

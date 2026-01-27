@@ -366,6 +366,42 @@ Body with footnote[^1].
 }
 
 #[test]
+fn feeds_render_plain_toc_and_strip_meta_row() {
+    let tmp = TempDir::new().expect("tempdir");
+
+    fs::create_dir_all(INPUT_DIR).unwrap();
+    fs::write("style.css", "body { color: black; }").unwrap();
+
+    let md = r#"---
+title: TOC Test
+ctime: 2025-05-05
+---
+# Heading
+
+## Section A
+
+### Deep A1
+"#;
+    write_md(tmp.path(), Path::new("toc.md"), md).unwrap();
+
+    build_at(tmp.path()).unwrap();
+
+    let rss_bytes = read_public_bytes(&tmp, Path::new("rss.xml"));
+    let channel = rss::Channel::read_from(&rss_bytes[..]).expect("parse rss");
+    let content = channel.items()[0].content().expect("rss content");
+
+    // TOC without numbering and with an H1 label.
+    assert!(content.contains(r#"<h1 id="contents">Contents</h1>"#));
+    assert!(!content.contains("toc-num"));
+    assert!(!content.contains("toc-list"));
+
+    // Meta row (Created/Updated/Tags) is omitted in feeds.
+    assert!(!content.contains("Created:"));
+    assert!(!content.contains("Updated:"));
+    assert!(!content.contains("Tags:"));
+}
+
+#[test]
 fn article_pages_include_opengraph_meta_with_absolute_urls() {
     let tmp = TempDir::new().expect("tempdir");
 

@@ -4,7 +4,10 @@ use proptest::{
 };
 use pulldown_cmark::{CowStr, Event, Tag, TagEnd};
 
-use crate::transformer::{WithTransformer, code_block::CodeHighlightTransformer};
+use crate::transformer::{
+    WithTransformer,
+    code_block::{CodeHighlightTransformer, FeedCodeLabelTransformer},
+};
 
 #[test]
 fn code_highlight_replaces_block() {
@@ -31,4 +34,30 @@ fn code_highlight_replaces_block() {
             Ok(())
         })
         .unwrap();
+}
+
+#[test]
+fn feed_code_labels_language() {
+    let events = vec![
+        Event::Start(Tag::CodeBlock(pulldown_cmark::CodeBlockKind::Fenced(
+            CowStr::from("go"),
+        ))),
+        Event::Text(CowStr::from("fmt.Println(\"hi\")")),
+        Event::End(TagEnd::CodeBlock),
+    ];
+
+    let out: Vec<_> = events
+        .into_iter()
+        .with_transformer::<FeedCodeLabelTransformer<_>>()
+        .collect();
+
+    assert_eq!(out.len(), 1);
+    if let Event::Html(html) = &out[0] {
+        let s = html.to_string();
+        assert!(s.contains("class=\"language-go\""));
+        assert!(s.contains("data-lang=\"go\""));
+        assert!(s.contains("fmt.Println"));
+    } else {
+        panic!("expected html");
+    }
 }

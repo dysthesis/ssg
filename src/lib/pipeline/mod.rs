@@ -21,10 +21,10 @@ use crate::{
     header::{generic_og_meta, Header},
     templates::page_shell,
     transformer::{
-        code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
+        code_block::{CodeHighlightTransformer, FeedCodeLabelTransformer}, epigraph::EpigraphTransformer,
         footnote::{FootnoteTransformer, PlainFootnoteTransformer},
         heading::HeadingDemoterTransformer, image::ImageCaptionTransformer, math::MathTransformer,
-        toc::TocTransformer, WithTransformer,
+        toc::{FeedTocTransformer, TocTransformer}, WithTransformer,
     },
     types::{Href, RelPath, Tag},
     utils::{escape_attr, prefix_to_root},
@@ -204,6 +204,7 @@ fn render_single(
 
     let header = Header::try_from(content).unwrap_or_default();
     let body_header = header.generate_body_head(&prefix);
+    let feed_body_header = header.generate_feed_body_head();
 
     let parser = Parser::new_ext(content, ctx.parser_options);
     let events: Vec<Event<'_>> = parser.collect();
@@ -221,7 +222,7 @@ fn render_single(
 
     // Capture the rendered article body (including header) for full-text feeds before adding
     // any extra navigation links that are only relevant on-page.
-    let feed_content_html = format!("{body_header}{feed_body}");
+    let feed_content_html = format!("{feed_body_header}{feed_body}");
 
     let mut page_body_with_nav = page_body;
     page_body_with_nav.push_str(&format!(
@@ -286,11 +287,11 @@ fn render_feed_body<'a>(events: Vec<Event<'a>>) -> String {
     let transformed = events
         .into_iter()
         .with_transformer::<EpigraphTransformer<'_>>()
-        .with_transformer::<CodeHighlightTransformer<'_, _>>()
+        .with_transformer::<FeedCodeLabelTransformer<'_, _>>()
         .with_transformer::<MathTransformer<'_, _>>()
         .with_transformer::<PlainFootnoteTransformer<'_>>()
         .with_transformer::<HeadingDemoterTransformer<'_, _>>()
-        .with_transformer::<TocTransformer<'_>>()
+        .with_transformer::<FeedTocTransformer<'_>>()
         .with_transformer::<ImageCaptionTransformer<_>>();
 
     let mut rendered = String::new();
