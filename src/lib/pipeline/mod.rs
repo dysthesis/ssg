@@ -14,24 +14,27 @@ use rayon::prelude::*;
 use walkdir::WalkDir;
 
 use crate::{
-    article::{Article, render_listing_page},
-    config::{INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
-    config::{SiteMeta, site_meta},
+    article::{render_listing_page, Article},
+    config::{site_meta, SiteMeta, INPUT_DIR, OUTPUT_DIR, POSTS_DIR, TAGS_DIR},
     css::build_css,
     feed::write_feeds,
-    header::{Header, generic_og_meta},
+    header::{generic_og_meta, Header},
     templates::page_shell,
     transformer::{
-        WithTransformer, code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
+        code_block::CodeHighlightTransformer, epigraph::EpigraphTransformer,
         footnote::FootnoteTransformer, heading::HeadingDemoterTransformer,
-        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer,
+        image::ImageCaptionTransformer, math::MathTransformer, toc::TocTransformer, WithTransformer,
     },
     types::{Href, RelPath, Tag},
     utils::{escape_attr, prefix_to_root},
 };
 
 type ParsedDoc = (PathBuf, String);
-type RenderedPage = (PathBuf, String);
+struct RenderedPage {
+    out_path: PathBuf,
+    minified: Vec<u8>,
+}
+
 type RenderOutcome = (Vec<RenderedPage>, Vec<Article>);
 
 /// Build once into OUTPUT_DIR using current working directory.
@@ -115,43 +118,30 @@ impl BuildCtx {
 }
 
 fn discover_sources(ctx: &BuildCtx) -> color_eyre::Result<Vec<(PathBuf, String)>> {
-    let mut md_paths: Vec<PathBuf> = Vec::new();
-    let mut walk_errors: Vec<walkdir::Error> = Vec::new();
+    let md_paths: Vec<PathBuf> = WalkDir::new(&ctx.input_dir)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry
+                    .path()
+                    .extension()
+                    .is_some_and(|ext| ext == "md")
+        })
+        .map(|entry| entry.path().to_path_buf())
+        .collect();
 
-    for item in WalkDir::new(&ctx.input_dir) {
-        match item {
-            Ok(entry) => {
-                if entry.file_type().is_file()
-                    && entry.path().extension().is_some_and(|ext| ext == "md")
-                {
-                    md_paths.push(entry.path().to_path_buf());
-                }
-            }
-            Err(e) => walk_errors.push(e),
-        }
-    }
+    let docs_res: Vec<_> = md_paths
+        .par_iter()
+        .map(|path| {
+            fs::read_to_string(path)
+                .map(|content| (path.clone(), content))
+                .map_err(|e| eyre!("Failed to read {}: {e}", path.display()))
+        })
+        .collect();
 
-    if !walk_errors.is_empty() {
-        return Err(eyre!(
-            "Failed to open some directory entries: {walk_errors:?}"
-        ));
-    }
-
-    md_paths.sort();
-
-    let mut docs: Vec<(PathBuf, String)> = Vec::with_capacity(md_paths.len());
-    let mut file_errors: Vec<(PathBuf, std::io::Error)> = Vec::new();
-
-    for path in md_paths {
-        match fs::read_to_string(&path) {
-            Ok(content) => docs.push((path, content)),
-            Err(e) => file_errors.push((path, e)),
-        }
-    }
-
-    if !file_errors.is_empty() {
-        return Err(eyre!("Failed to open some files: {file_errors:?}"));
-    }
+    let mut docs: Vec<(PathBuf, String)> = docs_res.into_iter().collect::<Result<_, _>>()?;
+    docs.par_sort_by(|a, b| a.0.cmp(&b.0));
 
     Ok(docs)
 }
@@ -175,86 +165,18 @@ fn transform_docs(parsed: Vec<ParsedDoc>) -> color_eyre::Result<Vec<ParsedDoc>> 
 }
 
 fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<RenderOutcome> {
-    let mut articles: Vec<Article> = Vec::new();
-    let mut rendered_pages = Vec::new();
+    let results: Vec<_> = items
+        .par_iter()
+        .map(|(rel_src, content)| render_single(ctx, rel_src, content))
+        .collect();
 
-    for (rel_src, content) in items {
-        let rel_out = PathBuf::from(POSTS_DIR)
-            .join(&rel_src)
-            .with_extension("html");
-        let rel_out = RelPath::new(rel_out).ok_or_else(|| eyre!("Output path must be relative"))?;
-        let out_path = ctx.output_dir.join(rel_out.as_path());
+    let mut rendered_pages = Vec::with_capacity(results.len());
+    let mut articles = Vec::with_capacity(results.len());
 
-        let href = Href::from_rel(&rel_out);
-        let prefix = prefix_to_root(rel_out.as_path());
-        let css_href = format!("{prefix}style.css");
-        let page_url = format!("{}/{}", ctx.site_meta.base_url, href.as_str());
-
-        let header = Header::try_from(content.as_str()).unwrap_or_default();
-        let body_header = header.generate_body_head(&prefix);
-
-        let parser = Parser::new_ext(content.as_str(), ctx.parser_options);
-        let events: Vec<Event<'_>> = parser.collect();
-
-        let has_math = events
-            .iter()
-            .any(|e| matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)));
-
-        let katex_href = format!("{prefix}assets/katex/katex.min.css");
-        let mut head_fragment = header.to_html(&css_href, has_math, &katex_href);
-        head_fragment.push_str(&header.opengraph_meta(&page_url, &ctx.site_meta));
-
-        // Apply transformers
-        let transformed = events
-            .into_iter()
-            .with_transformer::<EpigraphTransformer<'_>>()
-            .with_transformer::<CodeHighlightTransformer<'_, _>>()
-            .with_transformer::<MathTransformer<'_, _>>()
-            .with_transformer::<FootnoteTransformer<'_>>()
-            .with_transformer::<HeadingDemoterTransformer<'_, _>>()
-            .with_transformer::<TocTransformer<'_>>()
-            .with_transformer::<ImageCaptionTransformer<_>>();
-
-        let mut rendered = String::new();
-        pulldown_cmark::html::push_html(&mut rendered, transformed);
-
-        // Capture the rendered article body (including header) for full-text feeds before adding
-        // any extra navigation links that are only relevant on-page.
-        let feed_content_html = format!("{body_header}{rendered}");
-
-        rendered.push_str(&format!(
-            r#"
-<p class="meta"><a href="{0}index.html">Index</a></p>
-"#,
-            escape_attr(&prefix)
-        ));
-
-        let title = header
-            .title()
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| rel_out.as_path().to_string_lossy().to_string());
-
-        let summary = header.description().map(ToOwned::to_owned);
-
-        let article = Article {
-            title,
-            ctime: header.ctime(),
-            updated: header.mtime(),
-            summary,
-            content_html: feed_content_html,
-            href,
-            tags: header.tags().0,
-        };
+    for res in results {
+        let (page, article) = res?;
+        rendered_pages.push(page);
         articles.push(article);
-
-        let page_html = page_shell(
-            &ctx.head_html,
-            &head_fragment,
-            &body_header,
-            &rendered,
-            &ctx.footer_html,
-        );
-        rendered_pages.push((out_path, page_html));
     }
 
     // Sort by time first, then title
@@ -263,66 +185,120 @@ fn render_docs(ctx: &BuildCtx, items: Vec<ParsedDoc>) -> color_eyre::Result<Rend
     Ok((rendered_pages, articles))
 }
 
+fn render_single(
+    ctx: &BuildCtx,
+    rel_src: &PathBuf,
+    content: &str,
+) -> color_eyre::Result<(RenderedPage, Article)> {
+    let rel_out = PathBuf::from(POSTS_DIR)
+        .join(rel_src)
+        .with_extension("html");
+    let rel_out = RelPath::new(rel_out).ok_or_else(|| eyre!("Output path must be relative"))?;
+    let out_path = ctx.output_dir.join(rel_out.as_path());
+
+    let href = Href::from_rel(&rel_out);
+    let prefix = prefix_to_root(rel_out.as_path());
+    let css_href = format!("{prefix}style.css");
+    let page_url = format!("{}/{}", ctx.site_meta.base_url, href.as_str());
+
+    let header = Header::try_from(content).unwrap_or_default();
+    let body_header = header.generate_body_head(&prefix);
+
+    let parser = Parser::new_ext(content, ctx.parser_options);
+    let events: Vec<Event<'_>> = parser.collect();
+
+    let has_math = events
+        .iter()
+        .any(|e| matches!(e, Event::InlineMath(_) | Event::DisplayMath(_)));
+
+    let katex_href = format!("{prefix}assets/katex/katex.min.css");
+    let mut head_fragment = header.to_html(&css_href, has_math, &katex_href);
+    head_fragment.push_str(&header.opengraph_meta(&page_url, &ctx.site_meta));
+
+    // Apply transformers
+    let transformed = events
+        .into_iter()
+        .with_transformer::<EpigraphTransformer<'_>>()
+        .with_transformer::<CodeHighlightTransformer<'_, _>>()
+        .with_transformer::<MathTransformer<'_, _>>()
+        .with_transformer::<FootnoteTransformer<'_>>()
+        .with_transformer::<HeadingDemoterTransformer<'_, _>>()
+        .with_transformer::<TocTransformer<'_>>()
+        .with_transformer::<ImageCaptionTransformer<_>>();
+
+    let mut rendered = String::new();
+    pulldown_cmark::html::push_html(&mut rendered, transformed);
+
+    // Capture the rendered article body (including header) for full-text feeds before adding
+    // any extra navigation links that are only relevant on-page.
+    let feed_content_html = format!("{body_header}{rendered}");
+
+    rendered.push_str(&format!(
+        r#"
+<p class="meta"><a href="{0}index.html">Index</a></p>
+"#,
+        escape_attr(&prefix)
+    ));
+
+    let title = header
+        .title()
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| rel_out.as_path().to_string_lossy().to_string());
+
+    let summary = header.description().map(ToOwned::to_owned);
+
+    let article = Article {
+        title,
+        ctime: header.ctime(),
+        updated: header.mtime(),
+        summary,
+        content_html: feed_content_html,
+        href,
+        tags: header.tags().0,
+    };
+
+    let page_html = page_shell(
+        &ctx.head_html,
+        &head_fragment,
+        &body_header,
+        &rendered,
+        &ctx.footer_html,
+    );
+    let minified = minify(page_html.as_bytes(), &ctx.min_cfg);
+
+    Ok((
+        RenderedPage {
+            out_path,
+            minified,
+        },
+        article,
+    ))
+}
+
 fn emit_docs(
     ctx: &BuildCtx,
     rendered: Vec<RenderedPage>,
     articles: &[Article],
 ) -> color_eyre::Result<()> {
-    for (out_path, page_html) in rendered {
-        if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(out_path, minify(page_html.as_bytes(), &ctx.min_cfg))?;
+    for RenderedPage { out_path, minified } in rendered {
+        write_with_compression(&out_path, &minified)?;
     }
 
+    // Index and tag pages
     build_index(ctx, articles)?;
     build_tag_indices(ctx, articles)?;
-    write_feeds(&ctx.output_dir, articles)?;
 
-    // Minify and copy over style.css
+    // Feeds; compress after writing
+    write_feeds(&ctx.output_dir, articles)?;
+    compress_existing(&ctx.output_dir.join("rss.xml"))?;
+    compress_existing(&ctx.output_dir.join("atom.xml"))?;
+
+    // Minify and copy over style.css, then compress
     let stylesheet_in_path = ctx.current_dir.join("style").with_extension("css");
     if stylesheet_in_path.exists() {
         let stylesheet_out_path = ctx.output_dir.join("style").with_extension("css");
         let stylesheet = build_css(stylesheet_in_path.as_path())?;
-        fs::write(stylesheet_out_path, stylesheet)?;
-    }
-
-    precompress_outputs(&ctx.output_dir)?;
-
-    Ok(())
-}
-
-fn precompress_outputs(output_dir: &Path) -> color_eyre::Result<()> {
-    const TARGET_EXTS: &[&str] = &["html", "css", "xml", "js", "json"];
-
-    let files: Vec<_> = WalkDir::new(output_dir)
-        .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|ext| TARGET_EXTS.contains(&ext))
-                    .unwrap_or(false)
-        })
-        .map(|entry| entry.path().to_owned())
-        .collect();
-
-    if files.len() < 32 {
-        for path in files {
-            let data = fs::read(&path)?;
-            write_gzip_variant(&path, &data)?;
-            write_brotli_variant(&path, &data)?;
-        }
-    } else {
-        files.par_iter().try_for_each(|path| -> color_eyre::Result<()> {
-            let data = fs::read(path)?;
-            write_gzip_variant(path, &data)?;
-            write_brotli_variant(path, &data)?;
-            Ok(())
-        })?;
+        write_with_compression(&stylesheet_out_path, stylesheet.as_bytes())?;
     }
 
     Ok(())
@@ -350,12 +326,28 @@ fn write_brotli_variant(path: &Path, data: &[u8]) -> io::Result<()> {
             .unwrap_or_default()
     ));
 
-    // Use a balanced quality level: q6 keeps strong compression while avoiding
-    // the very slow q11 default.
+    // q6 keeps strong compression while avoiding the very slow q11 default.
     let mut writer = CompressorWriter::new(Vec::new(), 4096, 6, 22);
     writer.write_all(data)?;
     let compressed = writer.into_inner();
     fs::write(out_path, compressed)
+}
+
+fn write_with_compression(path: &Path, data: &[u8]) -> io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, data)?;
+    write_gzip_variant(path, data)?;
+    write_brotli_variant(path, data)?;
+    Ok(())
+}
+
+fn compress_existing(path: &Path) -> io::Result<()> {
+    let data = fs::read(path)?;
+    write_gzip_variant(path, &data)?;
+    write_brotli_variant(path, &data)?;
+    Ok(())
 }
 
 fn build_index(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {
@@ -380,10 +372,8 @@ fn build_index(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {
 
     let index_html = render_listing_page("Index", "Index", articles, &head_includes, &index_prefix);
 
-    fs::write(
-        ctx.output_dir.join("index.html"),
-        minify(index_html.as_bytes(), &ctx.min_cfg),
-    )
+    let bytes = minify(index_html.as_bytes(), &ctx.min_cfg);
+    write_with_compression(&ctx.output_dir.join("index.html"), &bytes)
 }
 
 trait PipelineStage {}
@@ -496,10 +486,8 @@ fn build_tag_indices(ctx: &BuildCtx, articles: &[Article]) -> io::Result<()> {
             &tag_prefix,
         );
 
-        fs::write(
-            ctx.output_dir.join(tag_rel),
-            minify(html.as_bytes(), &ctx.min_cfg),
-        )?;
+        let bytes = minify(html.as_bytes(), &ctx.min_cfg);
+        write_with_compression(&ctx.output_dir.join(tag_rel), &bytes)?;
     }
 
     Ok(())
