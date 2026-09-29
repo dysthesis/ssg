@@ -1,6 +1,19 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-09-29 18:00
+
+- `Tasks` can be modelled as a table, with the singular `Task` being a
+  projection -- a view, if you will -- containing references to the appropriate
+  fields in the table
+- A `Task` function can be faithful to the definition in Build Systems a la
+  Carte -- _i.e.,_, it maps a store `S` and a key `k` to a store `S'`, where
+  `S'` is `S` but with the value associated with `k` being ensured to be
+  up-to-date.
+- That is, the store (or a reference to it) becomes the input to a
+  task, rather than some arbitrary object.
+- [ ] Implement `Store` as an object storage before we can implement `Task`
+
 # 2026-09-29 16:00
 
 - Architecture framed around Build Systems a la Carte, as a build system with
