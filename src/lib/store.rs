@@ -120,6 +120,10 @@ mod tests {
             (Just(bytes), prop::collection::btree_set(0..len, 1..=len))
         })
     }
+    fn arb_hash() -> impl Strategy<Value = blake3::Hash> {
+        any::<[u8; 32]>().prop_map(blake3::Hash::from_bytes)
+    }
+
     proptest! {
         /// Self-explanatory, putting some bytes should return its hash
         #[test]
@@ -318,6 +322,6 @@ mod tests {
             let result = store.get(x_hash);
 
             prop_assert!(result.is_err());
-    }
+        }
     }
 }
