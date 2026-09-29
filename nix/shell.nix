@@ -16,6 +16,7 @@
       packages = with pkgs; [
         # Rust
         cargo-mutants
+        cargo-nextest
         bacon
         mold # faster linker for dev builds
         clang

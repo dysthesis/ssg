@@ -1,6 +1,12 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-09-29 21:45
+
+- When `Task` is implemented, we need to test that for all tasks, incremental
+  build (_i.e._, with a warm cache) is always equivalent to a clean build
+  (_i.e._, with a cold cache).
+
 # 2026-09-29 20:00
 
 - We'll implement the public functions of `Store`, some tests, and hook them
