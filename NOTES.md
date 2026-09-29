@@ -12,7 +12,9 @@ developing this
   up-to-date.
 - That is, the store (or a reference to it) becomes the input to a
   task, rather than some arbitrary object.
+- We also want a CLI to mess around with `Store`
 - [ ] Implement `Store` as an object storage before we can implement `Task`
+  - [ ] Implement CLI to interact with `Store`
 
 # 2026-09-29 16:00
 
