@@ -1,9 +1,9 @@
 {
   description = "Personal static site generator";
-
   inputs = {
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs-gdb16.url = "github:NixOS/nixpkgs/d546643212eb4a1c5ae3508fd833bc751983c076";
     crane.url = "github:ipetkov/crane";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";

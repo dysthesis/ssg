@@ -65,6 +65,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-gdb16": {
+      "locked": {
+        "lastModified": 1766253371,
+        "narHash": "sha256-Bb53Z8/asUNWvAenYuRAuS+b5v3o5g0MVDQHVSHNa8A=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d546643212eb4a1c5ae3508fd833bc751983c076",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d546643212eb4a1c5ae3508fd833bc751983c076",
+        "type": "github"
+      }
+    },
     "nixpkgs-lib": {
       "locked": {
         "lastModified": 1788057806,
@@ -102,6 +118,7 @@
         "crane": "crane",
         "flake-parts": "flake-parts",
         "nixpkgs": "nixpkgs",
+        "nixpkgs-gdb16": "nixpkgs-gdb16",
         "rust-overlay": "rust-overlay",
         "treefmt-nix": "treefmt-nix"
       }
