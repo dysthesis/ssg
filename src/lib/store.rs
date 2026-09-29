@@ -292,6 +292,7 @@ mod tests {
             prop_assert!(store.get(hash).is_err());
         }
 
+        /// Swap two objects' files and ensure `get` rejects them as well
         #[test]
         fn wrong_object_at_hash_path_is_rejected(
             x in any::<Vec<u8>>(),
