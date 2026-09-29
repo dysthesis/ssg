@@ -36,10 +36,12 @@ mod tests {
     use tempdir::TempDir;
 
     proptest! {
+        /// Self-explanatory, putting some bytes should return its hash
         #[test]
         fn put_returns_hash(bytes in any::<Vec<u8>>()) {
             let tmp = TempDir::new("test-put-returns-hash")?;
             let store = Store::init(tmp.path().to_path_buf())?;
+
             let key = store.put(&bytes)?;
             let expected = blake3::hash(&bytes);
             prop_assert_eq!(key, expected);
