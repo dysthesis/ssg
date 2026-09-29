@@ -11,7 +11,7 @@ type Result<T> = std::result::Result<T, Error>;
 /// A content-addressable storage used to store intermediate results of the
 /// build
 pub struct Store {
-    path: PathBuf,
+    pub path: PathBuf,
 }
 
 impl Store {
@@ -27,13 +27,65 @@ impl Store {
     pub fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
         todo!()
     }
+
+    #[cfg(test)]
+    pub fn objects(&self) -> color_eyre::Result<Vec<blake3::Hash>> {
+        use color_eyre::eyre::bail;
+        use std::fs;
+        fs::read_dir(self.path.clone())?
+            .map(|entry| {
+                let entry = entry?;
+
+                if !entry.file_type()?.is_file() {
+                    bail!("unexpected non-file entry: {:?}", entry.path());
+                }
+
+                let name = entry.file_name();
+                blake3::Hash::from_hex(name.as_encoded_bytes()).map_err(Into::into)
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use proptest_derive::Arbitrary;
     use tempdir::TempDir;
+
+    /// For modelling arbitrary actions in between our operations of interest
+    #[derive(Debug, Arbitrary)]
+    enum Op {
+        Put(Vec<u8>),
+        GetNonexistent(Vec<u8>),
+        GetExisting(usize),
+        Reopen,
+    }
+
+    impl Op {
+        pub fn run(&self, store: &Store) -> Result<()> {
+            match self {
+                Op::Put(bytes) => {
+                    store.put(bytes)?;
+                }
+                Op::GetNonexistent(bytes) => {
+                    let hash = blake3::hash(bytes);
+                    store.get(hash)?;
+                }
+                Op::GetExisting(idx) => {
+                    let objects = store.objects().unwrap();
+                    let clamped = idx % objects.len();
+                    let key = objects.get(clamped).expect("idx is a valid index");
+                    let _ = store.get(*key);
+                }
+                Op::Reopen => {
+                    let _ = Store::init(store.path.clone());
+                }
+            }
+            Ok(())
+        }
+    }
 
     proptest! {
         /// Self-explanatory, putting some bytes should return its hash
@@ -80,6 +132,24 @@ mod tests {
             let store = Store::init(tmp.path().to_path_buf())?;
             let obtained = store.get(nonexistent);
             prop_assert!(obtained.is_err());
+        }
+
+        /// We obtain the same object that we put in, even after arbitrary
+        /// operations
+        #[test]
+        fn object_id_is_immutable(bytes in any::<Vec<u8>>(), ops in any::<Vec<Op>>()) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let key = store.put(&bytes)?;
+
+            for op in ops {
+                let _ = op.run(&store);
+            }
+            drop(store);
+
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let obtained = store.get(key)?;
+            prop_assert_eq!(obtained, bytes);
         }
     }
 }
