@@ -371,5 +371,42 @@ mod tests {
 
             prop_assert_eq!(decoded, hash);
         }
+
+        #[test]
+        fn sharded_path_preserves_full_hash(
+            hash in arb_hash(),
+        ) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let path = store.object_path(hash);
+
+            let relative =
+                path.strip_prefix(store.path).unwrap();
+
+            let mut components =
+                relative.components();
+
+            let prefix = components
+                .next().unwrap()
+                .as_os_str()
+                .to_str().unwrap();
+
+            let suffix = components
+                .next().unwrap()
+                .as_os_str()
+                .to_str().unwrap();
+
+            prop_assert!(
+                components.next().is_none()
+            );
+
+            let reconstructed =
+                format!("{prefix}{suffix}");
+
+            prop_assert_eq!(
+                blake3::Hash::from_hex(&reconstructed) .unwrap(),
+                hash,
+            );
+        }
     }
 }
