@@ -1,9 +1,19 @@
-use std::path::PathBuf;
+use std::{
+    fs,
+    io::{self, Write},
+    path::PathBuf,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("The path {path} cannot be found, or is inaccessible.")]
     PathNotFound { path: PathBuf },
+    #[error("Failed to put object {hash}")]
+    PutError {
+        hash: blake3::Hash,
+        #[source]
+        error: io::Error,
+    },
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -25,6 +35,18 @@ impl Store {
     }
     /// Put some arbitrary bytes into the store, returning its key.
     pub fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
+        let hash = blake3::hash(bytes);
+        let writer = |file: &mut fs::File, bytes: &[u8]| file.write_all(bytes);
+        match self.put_inner(bytes, hash, writer) {
+            Ok(_) => Ok(hash),
+            Err(error) => Err(Error::PutError { hash, error }),
+        }
+    }
+
+    fn put_inner<W>(&self, bytes: &[u8], hash: blake3::Hash, writer: W) -> io::Result<()>
+    where
+        W: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+    {
         todo!()
     }
 
@@ -132,6 +154,16 @@ mod tests {
         })
     }
 
+    fn object_and_proper_prefix() -> impl Strategy<Value = (Vec<u8>, usize)> {
+        prop::collection::vec(any::<u8>(), 1..=8192).prop_flat_map(|bytes| {
+            let len = bytes.len();
+
+            (Just(bytes), 0..len)
+        })
+    }
+    fn injected_error() -> std::io::Error {
+        std::io::Error::other("injected write failure")
+    }
     proptest! {
         /// Self-explanatory, putting some bytes should return its hash
         #[test]
@@ -407,6 +439,32 @@ mod tests {
                 blake3::Hash::from_hex(&reconstructed) .unwrap(),
                 hash,
             );
+        }
+
+        /// Use a fault-injection writer that terminates after a pre-determined
+        /// prefix, and test that `put` never published the truncated object.
+        #[test]
+        fn incomplete_object_is_never_published(
+            (bytes, prefix_len) in object_and_proper_prefix(),
+        ) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let hash = blake3::hash(&bytes);
+
+            let writer = |file: &mut fs::File, bytes: &[u8]| {
+                file.write_all(&bytes[..prefix_len])?;
+                Err(injected_error())
+            };
+            let result = store.put_inner(
+                &bytes,
+                hash,
+                writer
+            );
+
+            prop_assert!(result.is_err());
+
+            // The logical object must not exist.
+            prop_assert!(store.get(hash).is_err());
         }
     }
 }
