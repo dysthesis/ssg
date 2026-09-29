@@ -78,6 +78,16 @@ impl Store {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        io::{BufRead, BufReader},
+        process::{Command, Stdio},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Barrier,
+        },
+        thread,
+    };
+
     use super::*;
     use proptest::prelude::*;
     use proptest_derive::Arbitrary;
@@ -163,6 +173,10 @@ mod tests {
     }
     fn injected_error() -> std::io::Error {
         std::io::Error::other("injected write failure")
+    }
+    fn distinct_objects() -> impl Strategy<Value = Vec<Vec<u8>>> {
+        prop::collection::btree_set(prop::collection::vec(any::<u8>(), 0..=4096), 2..=16)
+            .prop_map(|set| set.into_iter().collect())
     }
     proptest! {
         /// Self-explanatory, putting some bytes should return its hash
@@ -465,6 +479,271 @@ mod tests {
 
             // The logical object must not exist.
             prop_assert!(store.get(hash).is_err());
+        }
+        /// Multiple concurrent puts of the same bytes yields correct, identical
+        /// objects and keys
+        #[test]
+        fn concurrent_identical_puts_converge(
+            bytes in prop::collection::vec(any::<u8>(), 0..=8192),
+            writers in 2usize..=16,
+        ) {
+            let temp = TempDir::new("store").unwrap();
+
+            let store = Arc::new(
+                Store::init(temp.path().to_path_buf()).unwrap()
+            );
+
+            let barrier = Arc::new(Barrier::new(writers + 1));
+
+            let handles: Vec<_> = (0..writers)
+                .map(|_| {
+                    let store = Arc::clone(&store);
+                    let barrier = Arc::clone(&barrier);
+                    let bytes = bytes.clone();
+
+                    thread::spawn(move || {
+                        barrier.wait();
+                        store.put(&bytes)
+                    })
+                })
+                .collect();
+
+            // Release all writers together.
+            barrier.wait();
+
+            let expected = blake3::hash(&bytes);
+
+            for handle in handles {
+                let actual = handle
+                    .join()
+                    .expect("writer panicked")
+                    .expect("put failed");
+
+                prop_assert_eq!(actual, expected);
+            }
+
+            prop_assert_eq!(
+                store.get(expected).unwrap(),
+                bytes,
+            );
+        }
+        /// Puts remain correct even when concurrent, different puts occur
+        #[test]
+        fn concurrent_distinct_puts_do_not_interfere(
+            objects in distinct_objects(),
+        ) {
+            let temp = TempDir::new("store").unwrap();
+
+            let store = Arc::new(
+                Store::init(temp.path().to_path_buf()).unwrap()
+            );
+
+            let expected: Vec<_> = objects
+                .iter()
+                .map(|bytes| blake3::hash(bytes))
+                .collect();
+
+            // Exclude an actual cryptographic collision from the property.
+            let unique_hashes: std::collections::HashSet<_> =
+                expected.iter().copied().collect();
+
+            prop_assume!(unique_hashes.len() == objects.len());
+
+            let barrier =
+                Arc::new(Barrier::new(objects.len() + 1));
+
+            let handles: Vec<_> = objects
+                .iter()
+                .cloned()
+                .map(|bytes| {
+                    let store = Arc::clone(&store);
+                    let barrier = Arc::clone(&barrier);
+
+                    thread::spawn(move || {
+                        barrier.wait();
+
+                        let hash = store.put(&bytes)?;
+
+                        Ok::<_, Error>((hash, bytes))
+                    })
+                })
+                .collect();
+
+            barrier.wait();
+
+            for handle in handles {
+                let (hash, bytes) = handle
+                    .join()
+                    .expect("writer panicked")
+                    .expect("put failed");
+
+                prop_assert_eq!(
+                    hash,
+                    blake3::hash(&bytes)
+                );
+            }
+
+            // Verify the whole logical store after all racing writes.
+            for (bytes, hash) in objects.iter().zip(expected) {
+                prop_assert_eq!(
+                    store.get(hash).unwrap(),
+                    bytes.clone(),
+                );
+            }
+        }
+
+        /// During a racing publication, every read is either NotFound or the complete correct object
+        #[test]
+        fn concurrent_get_never_observes_partial_object(
+            bytes in prop::collection::vec(any::<u8>(), 1..=64 * 1024),
+            readers in 1usize..=8,
+        ) {
+            let temp = TempDir::new("store").unwrap();
+
+            let store = Arc::new(
+                Store::init(temp.path().to_path_buf()).unwrap()
+            );
+
+            let hash = blake3::hash(&bytes);
+
+            let start =
+                Arc::new(Barrier::new(readers + 2));
+
+            let finished =
+                Arc::new(AtomicBool::new(false));
+
+            let reader_handles: Vec<_> = (0..readers)
+                .map(|_| {
+                    let store = Arc::clone(&store);
+                    let start = Arc::clone(&start);
+                    let finished = Arc::clone(&finished);
+                    let expected = bytes.clone();
+
+                    thread::spawn(move || {
+                        start.wait();
+
+                        while !finished.load(Ordering::Acquire) {
+                            match store.get(hash) {
+                                Ok(actual) => {
+                                    assert_eq!(actual, expected);
+                                    assert_eq!(
+                                        blake3::hash(&actual),
+                                        hash
+                                    );
+                                }
+
+                                Err(Error::PathNotFound { .. }) => {
+                                    // Valid before publication.
+                                }
+
+                                Err(error) => {
+                                    panic!(
+                                        "reader observed invalid intermediate state: \
+                                         {error:?}"
+                                    );
+                                }
+                            }
+
+                            thread::yield_now();
+                        }
+                    })
+                })
+                .collect();
+
+            let writer_store = Arc::clone(&store);
+            let writer_start = Arc::clone(&start);
+            let writer_finished = Arc::clone(&finished);
+            let writer_bytes = bytes.clone();
+
+            let writer = thread::spawn(move || {
+                writer_start.wait();
+
+                let result = writer_store.put(&writer_bytes);
+
+                writer_finished.store(true, Ordering::Release);
+
+                result
+            });
+
+            // Release all readers and writer simultaneously.
+            start.wait();
+
+            let actual_hash = writer
+                .join()
+                .expect("writer panicked")
+                .expect("put failed");
+
+            prop_assert_eq!(actual_hash, hash);
+
+            for reader in reader_handles {
+                reader.join().expect("reader panicked");
+            }
+
+            // Once put has returned, absence is no longer permitted.
+            let actual = store.get(hash).unwrap();
+
+            prop_assert_eq!(&actual, &bytes);
+            prop_assert_eq!(blake3::hash(&actual), hash);
+        }
+
+        /// You cannot have two writers writing to the same file. But crashing
+        /// one writer should not interfere with the other.
+        #[test]
+        fn crashed_duplicate_writer_does_not_poison_survivor(
+            bytes in prop::collection::vec(any::<u8>(), 0..=8192),
+        ) {
+            let temp = TempDir::new("store").unwrap();
+
+            let root = temp.path().to_path_buf();
+            let input = root.join("input");
+
+            std::fs::write(&input, &bytes).unwrap();
+
+            let mut child = Command::new(
+                std::env::current_exe().unwrap()
+            )
+            .arg("duplicate_put_crash_child")
+            .arg("--ignored")
+            .arg("--exact")
+            .env("STORE_ROOT", &root)
+            .env("STORE_INPUT", &input)
+            .env("STORE_PAUSEPOINT", "before-rename")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+
+            let stdout = child.stdout.take().unwrap();
+            let mut stdout = BufReader::new(stdout);
+
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+
+            prop_assert_eq!(line.trim(), "READY");
+
+            // The first writer now has an abandoned candidate immediately
+            // before publication.
+            let store = Store::init(root.clone()).unwrap();
+
+            let expected = blake3::hash(&bytes);
+
+            // Kill the first writer without cleanup.
+            child.kill().unwrap();
+            child.wait().unwrap();
+
+            // A second writer must still be able to establish the object.
+            let actual = store.put(&bytes).unwrap();
+
+            prop_assert_eq!(actual, expected);
+
+            drop(store);
+
+            // Verify from a fresh handle, not process-local state.
+            let store = Store::init(root).unwrap();
+
+            prop_assert_eq!(
+                store.get(expected).unwrap(),
+                bytes,
+            );
         }
     }
 }
