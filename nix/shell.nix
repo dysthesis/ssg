@@ -18,7 +18,11 @@
         jq
       ];
       shellHook = ''
+        printf '\n'
+        printf '%*s\n' "$(tput cols)" ''' | tr ' ' '-'
         ${../scripts/todo}
+        printf '%*s\n' "$(tput cols)" ''' | tr ' ' '-'
+        printf '\n'
       '';
     };
   };
