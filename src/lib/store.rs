@@ -46,9 +46,11 @@ impl Store {
             .collect()
     }
 
-    #[cfg(test)]
+    #[inline]
     fn object_path(&self, hash: blake3::Hash) -> PathBuf {
-        self.path.join(hash.to_hex().as_str())
+        let hex = hash.to_hex();
+
+        self.path.join(&hex[..2]).join(&hex[2..])
     }
 }
 
@@ -122,6 +124,12 @@ mod tests {
     }
     fn arb_hash() -> impl Strategy<Value = blake3::Hash> {
         any::<[u8; 32]>().prop_map(blake3::Hash::from_bytes)
+    }
+    fn hash_with_leading_zeroes() -> impl Strategy<Value = blake3::Hash> {
+        (1usize..32, any::<[u8; 32]>()).prop_map(|(zeroes, mut bytes)| {
+            bytes[..zeroes].fill(0);
+            blake3::Hash::from_bytes(bytes)
+        })
     }
 
     proptest! {
@@ -322,6 +330,46 @@ mod tests {
             let result = store.get(x_hash);
 
             prop_assert!(result.is_err());
+        }
+
+        /// If two hashes differ, their object paths differ
+        #[test]
+        fn object_path_is_injective(
+            left in arb_hash(),
+            right in arb_hash(),
+        ) {
+            prop_assume!(left != right);
+
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let left_path = store.object_path(left);
+            let right_path = store.object_path(right);
+
+            prop_assert_ne!(left_path, right_path);
+        }
+
+        /// Test that leading zeroes are preserved in the object path
+        #[test]
+        fn object_path_preserves_leading_zeroes(
+            hash in hash_with_leading_zeroes(),
+        ) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let path = store.object_path(hash);
+
+            let filename = path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap();
+
+            prop_assert_eq!(filename.len(), 64);
+
+            let decoded = blake3::Hash::from_hex(filename).unwrap();
+
+            prop_assert_eq!(decoded, hash);
         }
     }
 }
