@@ -113,6 +113,13 @@ mod tests {
         .prop_flat_map(|len| prop::collection::vec(any::<u8>(), len))
     }
 
+    fn corrupted_object() -> impl Strategy<Value = (Vec<u8>, std::collections::BTreeSet<usize>)> {
+        prop::collection::vec(any::<u8>(), 1..=4096).prop_flat_map(|bytes| {
+            let len = bytes.len();
+
+            (Just(bytes), prop::collection::btree_set(0..len, 1..=len))
+        })
+    }
     proptest! {
         /// Self-explanatory, putting some bytes should return its hash
         #[test]
@@ -235,5 +242,81 @@ mod tests {
 
             prop_assert!(store.get(hash).is_err());
         }
+
+        /// Reject truncated object files
+        #[test]
+        fn any_truncation_is_rejected(
+            bytes in prop::collection::vec(any::<u8>(), 1..4096),
+            numerator in any::<usize>(),
+        ) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let hash = store.put(&bytes).unwrap();
+            let path = store.object_path(hash);
+
+            let new_len = numerator % bytes.len();
+
+            let file = std::fs::OpenOptions::new()
+                .write(true)
+                .open(path)
+                .unwrap();
+
+            file.set_len(new_len as u64).unwrap();
+
+            drop(store);
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            prop_assert!(store.get(hash).is_err());
+        }
+        /// Arbitrarily mutate bytes in the file and ensure that `get` rejects
+        /// it
+        #[test]
+        fn arbitrary_byte_mutations_are_rejected(
+            (bytes, indices) in corrupted_object(),
+        ) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let hash = store.put(&bytes).unwrap();
+            let path = store.object_path(hash);
+
+            let mut corrupted = bytes.clone();
+
+            for index in indices {
+                corrupted[index] = corrupted[index].wrapping_add(1);
+            }
+
+            std::fs::write(path, &corrupted).unwrap();
+
+            prop_assert!(store.get(hash).is_err());
+        }
+
+        #[test]
+        fn wrong_object_at_hash_path_is_rejected(
+            x in any::<Vec<u8>>(),
+            y in any::<Vec<u8>>(),
+        ) {
+            let x_hash = blake3::hash(&x);
+            let y_hash = blake3::hash(&y);
+
+            prop_assume!(x_hash != y_hash);
+
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let actual_hash = store.put(&x).unwrap();
+            prop_assert_eq!(actual_hash, x_hash);
+
+            std::fs::write(
+                store.object_path(x_hash),
+                &y,
+            )
+            .unwrap();
+
+            let result = store.get(x_hash);
+
+            prop_assert!(result.is_err());
+    }
     }
 }
