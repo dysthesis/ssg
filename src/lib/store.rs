@@ -45,7 +45,6 @@ mod tests {
             let key = store.put(&bytes)?;
             let expected = blake3::hash(&bytes);
             prop_assert_eq!(key, expected);
-            tmp.close()?
         }
     }
 }
