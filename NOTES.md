@@ -1,6 +1,13 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-09-29 20:00
+
+- We'll implement the public functions of `Store`, some tests, and hook them
+  up to the CLI before doing the actual impl
+- Apparently `blake3` does not implement `std::error::Error` for its error types
+  without the `std` feature enabled for it, so we'll enable that.
+
 # 2026-09-29 18:00
 
 - `Tasks` can be modelled as a table, with the singular `Task` being a

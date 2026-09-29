@@ -41,7 +41,7 @@
         printf '%*s\n' "$(tput cols)" ''' | tr ' ' '-'
         printf '\n'
       '';
-      RUST_GDB = lib.getExe gdb1 6;
+      RUST_GDB = lib.getExe gdb16;
     };
   };
 }
