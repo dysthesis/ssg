@@ -112,7 +112,7 @@ mod tests {
         /// Self-explanatory, putting some bytes should return its hash
         #[test]
         fn put_returns_hash(bytes in any::<Vec<u8>>()) {
-            let tmp = TempDir::new("test-put-returns-hash")?;
+            let tmp = TempDir::new("test")?;
             let store = Store::init(tmp.path().to_path_buf())?;
 
             let key = store.put(&bytes)?;
@@ -123,7 +123,7 @@ mod tests {
         /// Putting some bytes, then getting it, should return the original
         #[test]
         fn put_get_roundtrips(bytes in any::<Vec<u8>>()) {
-            let tmp = TempDir::new("test-put-returns-hash")?;
+            let tmp = TempDir::new("test")?;
             let store = Store::init(tmp.path().to_path_buf())?;
 
             let key = store.put(&bytes)?;
@@ -134,7 +134,7 @@ mod tests {
         /// Getting a key yields data that hashes to the same key
         #[test]
         fn get_verifies_hash(bytes in any::<Vec<u8>>()) {
-            let tmp = TempDir::new("test-put-returns-hash")?;
+            let tmp = TempDir::new("test")?;
             let store = Store::init(tmp.path().to_path_buf())?;
 
             let key = store.put(&bytes)?;
@@ -149,7 +149,7 @@ mod tests {
             // We're not going to actually put the bytes in the store,
             // we'll just hash it
             let nonexistent = blake3::hash(&bytes);
-            let tmp = TempDir::new("test-put-returns-hash")?;
+            let tmp = TempDir::new("test")?;
             let store = Store::init(tmp.path().to_path_buf())?;
             let obtained = store.get(nonexistent);
             prop_assert!(obtained.is_err());
