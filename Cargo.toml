@@ -1,0 +1,31 @@
+[package]
+name = "ssg"
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+
+[lib]
+name = "ssg"
+path = "src/lib/mod.rs"
+
+[[bin]]
+name = "ssg"
+path = "src/main.rs"
+
+[profile.dev]
+opt-level = 0
+debug = 0
+incremental = true
+codegen-units = 256
+
+[profile.release]
+opt-level = 3
+debug = 0
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+incremental = false
+strip = "symbols"
+
+[dependencies]
+blake3 = { version = "1.8.7", default-features = false }

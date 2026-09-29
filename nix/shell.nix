@@ -11,6 +11,9 @@
         # Rust
         cargo-mutants
         bacon
+        mold # faster linker for dev builds
+        clang
+
         # Nix
         statix
         deadnix

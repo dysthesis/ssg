@@ -1,0 +1,8 @@
+[unstable]
+profile-rustflags = true
+
+[target.'cfg(target_os = "linux")']
+linker = "clang"
+
+[profile.dev]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
