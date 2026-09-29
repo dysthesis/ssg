@@ -69,5 +69,17 @@ mod tests {
             let hashed = blake3::hash(&obtained);
             prop_assert_eq!(hashed, key);
         }
+
+        /// Getting a nonexistent key yields an Error
+        #[test]
+        fn get_nonexistent_yields_err(bytes in any::<Vec<u8>>()) {
+            // We're not going to actually put the bytes in the store,
+            // we'll just hash it
+            let nonexistent = blake3::hash(&bytes);
+            let tmp = TempDir::new("test-put-returns-hash")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let obtained = store.get(nonexistent);
+            prop_assert!(obtained.is_err());
+        }
     }
 }
