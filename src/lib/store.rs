@@ -183,15 +183,27 @@ mod tests {
             prop_assert_eq!(actual, bytes);
         }
 
-        /// Putting something twice yields the same key
+        /// Putting something multiple times yields the same key
         #[test]
-        fn put_idempotence(bytes in any::<Vec<u8>>()) {
+        fn put_idempotence(bytes in any::<Vec<u8>>(), reps in 2usize..1000) {
             let tmp = TempDir::new("test")?;
             let store = Store::init(tmp.path().to_path_buf())?;
 
-            let first = store.put(&bytes)?;
-            let second = store.put(&bytes)?;
-            prop_assert_eq!(first, second);
+            let attempts = (0..reps).map(|_| store.put(&bytes).unwrap()).collect::<Vec<_>>();
+            // All attempts must yield the same
+            prop_assert!(attempts.windows(2).all(|w| w[0] == w[1]));
+        }
+
+        /// Getting something multiple times yields the same key
+        #[test]
+        fn get_idemptotence(bytes in any::<Vec<u8>>(), reps in 2usize..1000) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let key = store.put(&bytes)?;
+
+            let attempts = (0..reps).map(|_| store.get(key).unwrap()).collect::<Vec<_>>();
+            // All attempts must yield the same
+            prop_assert!(attempts.windows(2).all(|w| w[0] == w[1]));
         }
     }
 }
