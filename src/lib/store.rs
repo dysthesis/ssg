@@ -172,6 +172,8 @@ mod tests {
             let obtained = store.get(key)?;
             prop_assert_eq!(obtained, bytes);
         }
+        /// Roundtrip test again, but for boundary sizes in particular for
+        /// off-by-one errors
         #[test]
         fn objects_roundtrip_in_boundary(bytes in boundary_sized_bytes()) {
             let tmp = TempDir::new("test")?;
@@ -179,6 +181,17 @@ mod tests {
             let hash = store.put(&bytes).unwrap();
             let actual = store.get(hash).unwrap();
             prop_assert_eq!(actual, bytes);
+        }
+
+        /// Putting something twice yields the same key
+        #[test]
+        fn put_idempotence(bytes in any::<Vec<u8>>()) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let first = store.put(&bytes)?;
+            let second = store.put(&bytes)?;
+            prop_assert_eq!(first, second);
         }
     }
 }
