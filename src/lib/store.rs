@@ -57,5 +57,17 @@ mod tests {
             let obtained = store.get(key)?;
             prop_assert_eq!(obtained, bytes);
         }
+
+        /// Getting a key yields data that hashes to the same key
+        #[test]
+        fn get_verifies_hash(bytes in any::<Vec<u8>>()) {
+            let tmp = TempDir::new("test-put-returns-hash")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let key = store.put(&bytes)?;
+            let obtained = store.get(key)?;
+            let hashed = blake3::hash(&obtained);
+            prop_assert_eq!(hashed, key);
+        }
     }
 }
