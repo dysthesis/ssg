@@ -17,6 +17,9 @@
         alejandra
         jq
       ];
+      shellHook = ''
+        ${../scripts/todo}
+      '';
     };
   };
 }

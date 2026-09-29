@@ -1,0 +1,83 @@
+#!/usr/bin/env sh
+
+root=$(git rev-parse --show-toplevel) || exit
+target="$root/NOTES.md"
+
+if [ -t 1 ]; then
+    heading='\033[1;36m'
+    reset='\033[0m'
+else
+    heading=''
+    reset=''
+fi
+
+awk -v heading="$heading" -v reset="$reset" '
+function emit_heading() {
+    if (current_heading != printed_heading) {
+        if (printed_heading != "")
+            print ""
+
+        printf "%s%s%s\n", heading, current_heading, reset
+        printed_heading = current_heading
+    }
+}
+
+function emit_task() {
+    if (!in_task)
+        return
+
+    emit_heading()
+    printf "  %s☐ %s\n", task_indent, task_text
+
+    in_task = 0
+    task_text = ""
+}
+
+/^#+[[:space:]]+/ {
+    emit_task()
+
+    line = $0
+    sub(/^#+[[:space:]]+/, "", line)
+    sub(/[[:space:]]+#+[[:space:]]*$/, "", line)
+
+    current_heading = line
+    next
+}
+
+match($0, /^[[:space:]]*-[[:space:]]+\[ \][[:space:]]*/) {
+    emit_task()
+
+    prefix = substr($0, 1, RLENGTH)
+
+    match(prefix, /^[[:space:]]*/)
+    task_indent = substr(prefix, 1, RLENGTH)
+
+    task_text = substr($0, length(prefix) + 1)
+    in_task = 1
+    next
+}
+
+# Any other list item ends the current task.
+/^[[:space:]]*-[[:space:]]+/ {
+    emit_task()
+    next
+}
+
+# Blank line ends the current task paragraph.
+/^[[:space:]]*$/ {
+    emit_task()
+    next
+}
+
+# Continuation of the current Markdown list item.
+in_task {
+    line = $0
+    sub(/^[[:space:]]+/, "", line)
+    task_text = task_text " " line
+    next
+}
+
+END {
+    emit_task()
+}
+' "$target"
