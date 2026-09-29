@@ -86,6 +86,27 @@ mod tests {
             Ok(())
         }
     }
+    /// Structural boundaries of BLAKE3 to catch off-by-one errors
+    fn boundary_sized_bytes() -> impl Strategy<Value = Vec<u8>> {
+        prop_oneof![
+            8 => prop::sample::select(vec![
+                0usize,
+                1,
+                63,
+                64,
+                65,
+                1023,
+                1024,
+                1025,
+                2048,
+                2049,
+                4096,
+                4097
+            ]),
+            2 => 0usize..=16 * 1024,
+        ]
+        .prop_flat_map(|len| prop::collection::vec(any::<u8>(), len))
+    }
 
     proptest! {
         /// Self-explanatory, putting some bytes should return its hash
@@ -150,6 +171,14 @@ mod tests {
             let store = Store::init(tmp.path().to_path_buf())?;
             let obtained = store.get(key)?;
             prop_assert_eq!(obtained, bytes);
+        }
+        #[test]
+        fn objects_roundtrip_in_boundary(bytes in boundary_sized_bytes()) {
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+            let hash = store.put(&bytes).unwrap();
+            let actual = store.get(hash).unwrap();
+            prop_assert_eq!(actual, bytes);
         }
     }
 }
