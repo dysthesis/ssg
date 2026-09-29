@@ -45,6 +45,11 @@ impl Store {
             })
             .collect()
     }
+
+    #[cfg(test)]
+    fn object_path(&self, hash: blake3::Hash) -> PathBuf {
+        self.path.join(hash.to_hex().as_str())
+    }
 }
 
 #[cfg(test)]
@@ -204,6 +209,31 @@ mod tests {
             let attempts = (0..reps).map(|_| store.get(key).unwrap()).collect::<Vec<_>>();
             // All attempts must yield the same
             prop_assert!(attempts.windows(2).all(|w| w[0] == w[1]));
+        }
+
+
+        /// Corrupting the file backing makes `get` yield an error
+        #[test]
+        fn replacement_with_different_content_is_rejected(
+            original in any::<Vec<u8>>(),
+            replacement in any::<Vec<u8>>(),
+        ) {
+            prop_assume!(blake3::hash(&original) != blake3::hash(&replacement));
+
+            let tmp = TempDir::new("test")?;
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            let hash = store.put(&original).unwrap();
+
+            std::fs::write(
+                store.object_path(hash),
+                &replacement,
+            ).unwrap();
+
+            drop(store);
+            let store = Store::init(tmp.path().to_path_buf())?;
+
+            prop_assert!(store.get(hash).is_err());
         }
     }
 }
