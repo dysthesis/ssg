@@ -1,6 +1,12 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-09-29 22:30
+
+- A `Store` can be idealised as a `HashMap`. We can use that to implement
+  differential testing; just continuously fuzz and feed the same random bytes to
+  the two, and detect any behavioural differences.
+
 # 2026-09-29 21:45
 
 - When `Task` is implemented, we need to test that for all tasks, incremental
