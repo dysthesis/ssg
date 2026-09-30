@@ -189,6 +189,33 @@ mod tests {
         }
     }
 
+    // Drop the opened capability before tempdir cleanup; verify preservation
+    // through std::fs paths, not the capability under test.
+    struct EscapeSandbox {
+        dir: Dir,
+        root: PathBuf,
+        inside: PathBuf,
+        _tmp: TempDir,
+    }
+
+    impl EscapeSandbox {
+        fn new(bytes: &[u8]) -> io::Result<Self> {
+            let tmp = TempDir::new("dir")?;
+            let parent = std::path::absolute(tmp.path())?;
+            let root = parent.join("root");
+            std::fs::create_dir(&root)?;
+            let inside = root.join("inside");
+            std::fs::write(&inside, bytes)?;
+            let dir = Dir::new(&root)?;
+            Ok(Self { dir, root, inside, _tmp: tmp })
+        }
+
+        fn assert_inside_unchanged(&self, bytes: &[u8]) {
+            assert!(self.root.is_dir());
+            assert_eq!(std::fs::read(&self.inside).unwrap().as_slice(), bytes);
+        }
+    }
+
     #[test]
     fn empty_path_is_rejected() -> color_eyre::Result<()> {
         let tmp = TempDir::new("dir")?;
@@ -372,21 +399,14 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.open_read(&Path::new("..").join(&sibling)));
+            assert_invalid_input(sandbox.dir.open_read(&Path::new("..").join(&sibling)));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes.clone());
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert_eq!(std::fs::read(&outside).unwrap(), bytes);
         }
 
@@ -395,21 +415,14 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.metadata(&Path::new("..").join(&sibling)));
+            assert_invalid_input(sandbox.dir.metadata(&Path::new("..").join(&sibling)));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes.clone());
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert_eq!(std::fs::read(&outside).unwrap(), bytes);
         }
 
@@ -418,21 +431,14 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.remove_file(&Path::new("..").join(&sibling)));
+            assert_invalid_input(sandbox.dir.remove_file(&Path::new("..").join(&sibling)));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes.clone());
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert_eq!(std::fs::read(&outside).unwrap(), bytes);
         }
 
@@ -441,21 +447,14 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             prop_assert!(!outside.exists());
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.create_new(&Path::new("..").join(&sibling)));
+            assert_invalid_input(sandbox.dir.create_new(&Path::new("..").join(&sibling)));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes);
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert!(!outside.exists());
         }
 
@@ -464,21 +463,14 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             prop_assert!(!outside.exists());
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.create_dir_all(&Path::new("..").join(&sibling)));
+            assert_invalid_input(sandbox.dir.create_dir_all(&Path::new("..").join(&sibling)));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes);
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert!(!outside.exists());
         }
 
@@ -487,26 +479,19 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
-            let destination = root.join("destination");
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
+            let destination = sandbox.root.join("destination");
             prop_assert!(!destination.exists());
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.rename(
+            assert_invalid_input(sandbox.dir.rename(
                 &Path::new("..").join(&sibling),
                 Path::new("destination"),
             ));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes.clone());
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert_eq!(std::fs::read(&outside).unwrap(), bytes);
             prop_assert!(!destination.exists());
         }
@@ -516,24 +501,17 @@ mod tests {
             name in component(),
             bytes in prop::collection::vec(any::<u8>(), 0..=4096),
         ) {
-            let tmp = TempDir::new("dir").unwrap();
-            let parent = std::path::absolute(tmp.path()).unwrap();
-            let root = parent.join("root");
-            std::fs::create_dir(&root).unwrap();
-            let inside = root.join("inside");
-            std::fs::write(&inside, &bytes).unwrap();
+            let sandbox = EscapeSandbox::new(&bytes).unwrap();
             let sibling = format!("outside-{name}");
-            let outside = parent.join(&sibling);
+            let outside = sandbox.root.parent().unwrap().join(&sibling);
             prop_assert!(!outside.exists());
-            let dir = Dir::new(&root).unwrap();
 
-            assert_invalid_input(dir.rename(
+            assert_invalid_input(sandbox.dir.rename(
                 Path::new("inside"),
                 &Path::new("..").join(&sibling),
             ));
 
-            prop_assert!(root.is_dir());
-            prop_assert_eq!(std::fs::read(&inside).unwrap(), bytes);
+            sandbox.assert_inside_unchanged(&bytes);
             prop_assert!(!outside.exists());
         }
     }
