@@ -1037,6 +1037,96 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn opened_root_survives_pathname_replacement() -> color_eyre::Result<()> {
+        let tmp = TempDir::new("dir")?;
+        let parent = std::path::absolute(tmp.path())?;
+        let root = parent.join("root");
+        let moved = parent.join("moved_root");
+        std::fs::create_dir(&root)?;
+        std::fs::write(root.join("read_me"), b"original read")?;
+        std::fs::write(root.join("type_probe"), b"original file")?;
+        std::fs::write(root.join("remove_me"), b"original removal")?;
+        std::fs::write(root.join("from_original"), b"original source")?;
+        std::fs::write(root.join("from_destination"), b"original second source")?;
+        std::fs::write(root.join("into_original"), b"original old destination")?;
+
+        let dir = Dir::new(&root)?;
+        std::fs::rename(&root, &moved)?;
+        std::fs::create_dir(&root)?;
+        std::fs::write(root.join("read_me"), b"replacement read")?;
+        std::fs::create_dir(root.join("type_probe"))?;
+        std::fs::write(root.join("type_probe/marker"), b"replacement directory")?;
+        std::fs::write(root.join("remove_me"), b"replacement removal")?;
+        std::fs::write(root.join("from_original"), b"replacement source")?;
+        std::fs::write(root.join("to_original"), b"replacement first destination")?;
+        std::fs::write(root.join("from_destination"), b"replacement second source")?;
+        std::fs::write(root.join("into_original"), b"replacement second destination")?;
+
+        let mut bytes = Vec::new();
+        dir.open_read(Path::new("read_me"))?.read_to_end(&mut bytes)?;
+        assert_eq!(bytes, b"original read");
+        assert_eq!(std::fs::read(moved.join("read_me"))?, b"original read");
+        assert_eq!(std::fs::read(root.join("read_me"))?, b"replacement read");
+
+        assert!(dir.metadata(Path::new("type_probe"))? == Kind::File);
+        assert!(std::fs::metadata(moved.join("type_probe"))?.is_file());
+        assert_eq!(std::fs::read(moved.join("type_probe"))?, b"original file");
+        assert!(std::fs::metadata(root.join("type_probe"))?.is_dir());
+        assert_eq!(std::fs::read(root.join("type_probe/marker"))?, b"replacement directory");
+
+        dir.create_dir_all(Path::new("new_dir/nested"))?;
+        assert!(std::fs::metadata(moved.join("new_dir/nested"))?.is_dir());
+        assert_absent(&root.join("new_dir"));
+
+        let mut writer = dir.create_new(Path::new("new_file"))?;
+        writer.write_all(b"created under original")?;
+        drop(writer);
+        assert_eq!(std::fs::read(moved.join("new_file"))?, b"created under original");
+        assert_absent(&root.join("new_file"));
+
+        dir.rename(Path::new("from_original"), Path::new("to_original"))?;
+        assert_absent(&moved.join("from_original"));
+        assert_eq!(std::fs::read(moved.join("to_original"))?, b"original source");
+        assert_eq!(std::fs::read(root.join("from_original"))?, b"replacement source");
+        assert_eq!(std::fs::read(root.join("to_original"))?, b"replacement first destination");
+
+        dir.rename(Path::new("from_destination"), Path::new("into_original"))?;
+        assert_absent(&moved.join("from_destination"));
+        assert_eq!(std::fs::read(moved.join("into_original"))?, b"original second source");
+        assert_eq!(std::fs::read(root.join("from_destination"))?, b"replacement second source");
+        assert_eq!(std::fs::read(root.join("into_original"))?, b"replacement second destination");
+
+        dir.remove_file(Path::new("remove_me"))?;
+        assert_absent(&moved.join("remove_me"));
+        assert_eq!(std::fs::read(root.join("remove_me"))?, b"replacement removal");
+
+        let mut moved_names = std::fs::read_dir(&moved)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        moved_names.sort();
+        assert_eq!(
+            moved_names,
+            ["into_original", "new_dir", "new_file", "read_me", "to_original", "type_probe"]
+                .map(std::ffi::OsString::from),
+        );
+        let nested_names = std::fs::read_dir(moved.join("new_dir"))?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        assert_eq!(nested_names, [std::ffi::OsString::from("nested")]);
+        let mut replacement_names = std::fs::read_dir(&root)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        replacement_names.sort();
+        assert_eq!(
+            replacement_names,
+            ["from_destination", "from_original", "into_original", "read_me", "remove_me",
+             "to_original", "type_probe"].map(std::ffi::OsString::from),
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn kind_does_not_follow_final_symlink() -> color_eyre::Result<()> {
         use std::os::unix::fs::symlink;
 
