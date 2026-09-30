@@ -34,6 +34,8 @@ pub(crate) enum Kind {
 /// Operation paths must have one or more normal components after ignoring
 /// current-directory components (`.`). Parent, root, and prefix components
 /// are rejected before filesystem I/O.
+///
+/// Ancestor symlinks may resolve within the root but cannot escape it.
 #[derive(Debug)]
 pub struct Dir {
     cap_root: CapDir,
@@ -70,7 +72,6 @@ impl Dir {
             ))
         }
     }
-
 }
 
 impl Fs for Dir {
@@ -207,13 +208,95 @@ mod tests {
             let inside = root.join("inside");
             std::fs::write(&inside, bytes)?;
             let dir = Dir::new(&root)?;
-            Ok(Self { dir, root, inside, _tmp: tmp })
+            Ok(Self {
+                dir,
+                root,
+                inside,
+                _tmp: tmp,
+            })
         }
 
         fn assert_inside_unchanged(&self, bytes: &[u8]) {
             assert!(self.root.is_dir());
             assert_eq!(std::fs::read(&self.inside).unwrap().as_slice(), bytes);
         }
+    }
+
+    #[cfg(unix)]
+    struct SymlinkSandbox {
+        dir: Dir,
+        root: PathBuf,
+        outside: PathBuf,
+        link_target: PathBuf,
+        _tmp: TempDir,
+    }
+
+    #[cfg(unix)]
+    impl SymlinkSandbox {
+        fn new(absolute_link: bool) -> io::Result<Self> {
+            use std::os::unix::fs::symlink;
+
+            let tmp = TempDir::new("dir")?;
+            let parent = std::path::absolute(tmp.path())?;
+            let root = parent.join("root");
+            let outside = parent.join("outside");
+            std::fs::create_dir(&root)?;
+            std::fs::create_dir(&outside)?;
+            std::fs::create_dir(root.join("inside"))?;
+            std::fs::write(root.join("inside/sentinel"), b"inside sentinel")?;
+            std::fs::write(outside.join("sentinel"), b"outside sentinel")?;
+            let link_target = if absolute_link {
+                outside.clone()
+            } else {
+                PathBuf::from("../outside")
+            };
+            symlink(&link_target, root.join("escape"))?;
+            let dir = Dir::new(&root)?;
+            Ok(Self {
+                dir,
+                root,
+                outside,
+                link_target,
+                _tmp: tmp,
+            })
+        }
+
+        fn assert_unchanged(&self) -> io::Result<()> {
+            assert!(self.root.is_dir());
+            assert_eq!(
+                std::fs::read(self.root.join("inside/sentinel"))?,
+                b"inside sentinel"
+            );
+            assert_eq!(
+                std::fs::read(self.outside.join("sentinel"))?,
+                b"outside sentinel"
+            );
+            assert!(std::fs::symlink_metadata(self.root.join("escape"))?
+                .file_type()
+                .is_symlink());
+            assert_eq!(
+                std::fs::read_link(self.root.join("escape"))?,
+                self.link_target
+            );
+            let inside_names = std::fs::read_dir(self.root.join("inside"))?
+                .map(|entry| entry.map(|entry| entry.file_name()))
+                .collect::<io::Result<Vec<_>>>()?;
+            let outside_names = std::fs::read_dir(&self.outside)?
+                .map(|entry| entry.map(|entry| entry.file_name()))
+                .collect::<io::Result<Vec<_>>>()?;
+            assert_eq!(inside_names, vec![std::ffi::OsString::from("sentinel")]);
+            assert_eq!(outside_names, vec![std::ffi::OsString::from("sentinel")]);
+            Ok(())
+        }
+    }
+
+    #[cfg(unix)]
+    fn assert_absent(path: &Path) {
+        assert_eq!(
+            std::fs::symlink_metadata(path).unwrap_err().kind(),
+            io::ErrorKind::NotFound,
+            "unexpected object at {path:?}",
+        );
     }
 
     #[test]
@@ -728,6 +811,228 @@ mod tests {
             prop_assert!(dir.metadata(Path::new(&file))? == Kind::File);
             prop_assert!(dir.metadata(Path::new(&directory))? == Kind::Directory);
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ancestor_symlink_escape_is_denied() -> color_eyre::Result<()> {
+        for absolute_link in [false, true] {
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            assert!(sandbox
+                .dir
+                .create_dir_all(Path::new("escape/new/child"))
+                .is_err());
+            assert_absent(&sandbox.outside.join("new"));
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            assert!(sandbox
+                .dir
+                .create_new(Path::new("escape/new_file"))
+                .is_err());
+            assert_absent(&sandbox.outside.join("new_file"));
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            match sandbox.dir.open_read(Path::new("escape/sentinel")) {
+                Err(_) => {}
+                Ok(mut reader) => {
+                    let mut bytes = Vec::new();
+                    reader.read_to_end(&mut bytes)?;
+                    panic!("escaping open_read returned outside bytes: {bytes:?}");
+                }
+            }
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            assert!(sandbox.dir.metadata(Path::new("escape/sentinel")).is_err());
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            assert!(sandbox
+                .dir
+                .remove_file(Path::new("escape/sentinel"))
+                .is_err());
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            assert!(sandbox
+                .dir
+                .rename(Path::new("escape/sentinel"), Path::new("destination"),)
+                .is_err());
+            assert_absent(&sandbox.root.join("destination"));
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            std::fs::write(sandbox.root.join("source"), b"source bytes")?;
+            assert!(sandbox
+                .dir
+                .rename(Path::new("source"), Path::new("escape/sentinel"),)
+                .is_err());
+            assert_eq!(std::fs::read(sandbox.root.join("source"))?, b"source bytes");
+            sandbox.assert_unchanged()?;
+
+            let sandbox = SymlinkSandbox::new(absolute_link)?;
+            std::fs::write(sandbox.root.join("source"), b"source bytes")?;
+            assert!(sandbox
+                .dir
+                .rename(Path::new("source"), Path::new("escape/new_file"),)
+                .is_err());
+            assert_eq!(std::fs::read(sandbox.root.join("source"))?, b"source bytes");
+            assert_absent(&sandbox.outside.join("new_file"));
+            sandbox.assert_unchanged()?;
+        }
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ancestor_symlink_within_root_supports_operations() -> color_eyre::Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new("dir")?;
+        let root = std::path::absolute(tmp.path())?;
+        std::fs::create_dir(root.join("inside"))?;
+        std::fs::write(root.join("inside/sentinel"), b"inside sentinel")?;
+        symlink("inside", root.join("link"))?;
+        let dir = Dir::new(&root)?;
+
+        dir.create_dir_all(Path::new("link/new_dir/child"))?;
+        assert!(std::fs::metadata(root.join("inside/new_dir/child"))?.is_dir());
+        let child_names = std::fs::read_dir(root.join("inside/new_dir"))?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        assert_eq!(child_names, vec![std::ffi::OsString::from("child")]);
+
+        let mut writer = dir.create_new(Path::new("link/new_file"))?;
+        writer.write_all(b"created bytes")?;
+        drop(writer);
+        assert_eq!(
+            std::fs::read(root.join("inside/new_file"))?,
+            b"created bytes"
+        );
+
+        let mut bytes = Vec::new();
+        dir.open_read(Path::new("link/sentinel"))?
+            .read_to_end(&mut bytes)?;
+        assert_eq!(bytes, b"inside sentinel");
+        assert!(dir.metadata(Path::new("link/sentinel"))? == Kind::File);
+        assert!(dir.metadata(Path::new("link/new_dir/child"))? == Kind::Directory);
+
+        dir.remove_file(Path::new("link/new_file"))?;
+        assert_absent(&root.join("inside/new_file"));
+
+        std::fs::write(root.join("inside/from_link"), b"source bytes")?;
+        dir.rename(Path::new("link/from_link"), Path::new("moved_from_link"))?;
+        assert_absent(&root.join("inside/from_link"));
+        assert_eq!(
+            std::fs::read(root.join("moved_from_link"))?,
+            b"source bytes"
+        );
+
+        std::fs::write(root.join("source"), b"destination bytes")?;
+        dir.rename(Path::new("source"), Path::new("link/at_link"))?;
+        assert_absent(&root.join("source"));
+        assert_eq!(
+            std::fs::read(root.join("inside/at_link"))?,
+            b"destination bytes"
+        );
+        assert_eq!(
+            std::fs::read(root.join("inside/sentinel"))?,
+            b"inside sentinel"
+        );
+        assert!(std::fs::symlink_metadata(root.join("link"))?
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_link(root.join("link"))?, Path::new("inside"));
+
+        let mut root_names = std::fs::read_dir(&root)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        root_names.sort();
+        assert_eq!(
+            root_names,
+            ["inside", "link", "moved_from_link"].map(std::ffi::OsString::from)
+        );
+        let mut inside_names = std::fs::read_dir(root.join("inside"))?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+        inside_names.sort();
+        assert_eq!(
+            inside_names,
+            ["at_link", "new_dir", "sentinel"].map(std::ffi::OsString::from)
+        );
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escaping_final_symlink_is_not_followed_or_replaced_through() -> color_eyre::Result<()> {
+        use std::os::unix::fs::symlink;
+
+        let tmp = TempDir::new("dir")?;
+        let parent = std::path::absolute(tmp.path())?;
+        let root = parent.join("root");
+        let outside = parent.join("outside");
+        std::fs::create_dir(&root)?;
+        std::fs::create_dir(&outside)?;
+        std::fs::write(root.join("inside"), b"inside sentinel")?;
+        std::fs::write(outside.join("sentinel"), b"outside sentinel")?;
+        let target = Path::new("../outside/sentinel");
+        symlink(target, root.join("link"))?;
+        let dir = Dir::new(&root)?;
+
+        match dir.open_read(Path::new("link")) {
+            Err(_) => {}
+            Ok(mut reader) => {
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes)?;
+                panic!("final symlink open_read returned outside bytes: {bytes:?}");
+            }
+        }
+        assert!(dir.create_new(Path::new("link")).is_err());
+        assert!(dir.metadata(Path::new("link"))? == Kind::Other);
+        assert!(std::fs::symlink_metadata(root.join("link"))?
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_link(root.join("link"))?, target);
+        assert_eq!(
+            std::fs::read(outside.join("sentinel"))?,
+            b"outside sentinel"
+        );
+
+        dir.rename(Path::new("link"), Path::new("moved_link"))?;
+        assert_absent(&root.join("link"));
+        assert!(std::fs::symlink_metadata(root.join("moved_link"))?
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_link(root.join("moved_link"))?, target);
+        assert_eq!(
+            std::fs::read(outside.join("sentinel"))?,
+            b"outside sentinel"
+        );
+
+        dir.remove_file(Path::new("moved_link"))?;
+        assert_absent(&root.join("moved_link"));
+        assert_eq!(
+            std::fs::read(outside.join("sentinel"))?,
+            b"outside sentinel"
+        );
+
+        symlink(target, root.join("link"))?;
+        std::fs::write(root.join("source"), b"replacement bytes")?;
+        dir.rename(Path::new("source"), Path::new("link"))?;
+        assert_absent(&root.join("source"));
+        assert!(std::fs::symlink_metadata(root.join("link"))?
+            .file_type()
+            .is_file());
+        assert_eq!(std::fs::read(root.join("link"))?, b"replacement bytes");
+        assert_eq!(
+            std::fs::read(outside.join("sentinel"))?,
+            b"outside sentinel"
+        );
+        assert_eq!(std::fs::read(root.join("inside"))?, b"inside sentinel");
+        Ok(())
     }
 
     #[cfg(unix)]
