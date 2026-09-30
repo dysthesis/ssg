@@ -30,6 +30,10 @@ pub(crate) enum Kind {
 }
 
 /// Filesystem operations rooted at an opened directory capability.
+///
+/// Operation paths must have one or more normal components after ignoring
+/// current-directory components (`.`). Parent, root, and prefix components
+/// are rejected before filesystem I/O.
 #[derive(Debug)]
 pub struct Dir {
     root: PathBuf,
@@ -53,27 +57,19 @@ impl Dir {
 
     #[inline]
     fn validate(path: &Path) -> io::Result<()> {
-        let mut has_name = false;
-        for component in path.components() {
-            match component {
-                Component::Normal(_) => has_name = true,
-                Component::CurDir => {}
-                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "expected a nonempty relative path without parent components",
-                    ));
-                }
-            }
-        }
-
-        if !has_name {
-            return Err(io::Error::new(
+        let mut components = path
+            .components()
+            .filter(|component| *component != Component::CurDir);
+        if matches!(components.next(), Some(Component::Normal(_)))
+            && components.all(|component| matches!(component, Component::Normal(_)))
+        {
+            Ok(())
+        } else {
+            Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "expected a nonempty relative path without parent components",
-            ));
+            ))
         }
-        Ok(())
     }
 
     /// Map a validated relative path to the supplied root spelling for tests.
@@ -231,6 +227,36 @@ mod tests {
             .expect_err("current-directory path must be rejected");
 
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+
+        Ok(())
+    }
+
+    #[test]
+    fn current_directory_components_work_in_operations() -> color_eyre::Result<()> {
+        let tmp = TempDir::new("dir")?;
+        let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+
+        dir.create_dir_all(Path::new("./nested/./child"))?;
+        let mut writer = dir.create_new(Path::new("./nested/./child/file"))?;
+        writer.write_all(b"content")?;
+        drop(writer);
+
+        dir.rename(
+            Path::new("./nested/./child/file"),
+            Path::new("nested/./child/moved"),
+        )?;
+        let mut actual = Vec::new();
+        dir.open_read(Path::new("./nested/./child/moved"))?
+            .read_to_end(&mut actual)?;
+        assert_eq!(actual, b"content");
+        assert!(dir.metadata(Path::new("nested/./child/moved"))? == Kind::File);
+        dir.remove_file(Path::new("./nested/./child/moved"))?;
+        assert_eq!(
+            dir.open_read(Path::new("nested/child/moved"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::NotFound
+        );
 
         Ok(())
     }
