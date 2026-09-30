@@ -13,7 +13,7 @@ developing this
 - We'll implmement an `Fs` trait abstracting filesystem behaviour, rather than
   interacting with `std::fs` directly, so that we can do things like fault
   injection for testing.
-- [ ] Implement an `Fs` trait for swappable filesystem abstractions.
+- [x] Implement an `Fs` trait for swappable filesystem abstractions.
 
 # 2026-09-29 22:30
 

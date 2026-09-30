@@ -1,3 +1,6 @@
+@mutants *ARGS:
+	cargo mutants -j8 -- {{ARGS}}
+
 @build *ARGS:
 	cargo build {{ARGS}}
 
