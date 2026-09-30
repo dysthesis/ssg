@@ -1,13 +1,13 @@
+use cap_std::ambient_authority;
+use cap_std::fs::{Dir as CapDir, OpenOptions};
+
 use std::{
     fs::File,
     io::{self, Read, Result, Write},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 
-/// Filesystem interface for swappable abstraction, used for _e.g._ fault
-/// injection
-// WARN: This is a security boundary, as everything interacts with the
-// filesystem from this
+/// Filesystem interface for swappable backends, e.g. fault injection.
 pub(crate) trait Fs: Send + Sync {
     type Reader: Read;
     type Writer: Write;
@@ -29,24 +29,59 @@ pub(crate) enum Kind {
     Other,
 }
 
-/// An implementation of [`Fs`] that interacts relative to the associated root
-/// directory and restricts operations to specifically only that directory.
+/// Filesystem operations rooted at an opened directory capability.
 #[derive(Debug)]
 pub struct Dir {
     root: PathBuf,
+    cap_root: CapDir,
 }
 
 impl Dir {
-    /// Bind to an existing absolute directory.
+    /// Open an existing absolute directory, retaining its supplied spelling.
+    /// The spelling is not used for subsequent filesystem I/O.
     pub(crate) fn new(root: PathBuf) -> io::Result<Self> {
-        todo!()
+        if !root.is_absolute() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "root must be an absolute directory",
+            ));
+        }
+
+        let cap_root = CapDir::open_ambient_dir(&root, ambient_authority())?;
+        Ok(Self { root, cap_root })
     }
 
-    /// Validate a Store-relative path and map it into the root namespace.
-    ///
-    /// Invalid paths fail with `io::ErrorKind::InvalidInput`.
+    #[inline]
+    fn validate(path: &Path) -> io::Result<()> {
+        let mut has_name = false;
+        for component in path.components() {
+            match component {
+                Component::Normal(_) => has_name = true,
+                Component::CurDir => {}
+                Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "expected a nonempty relative path without parent components",
+                    ));
+                }
+            }
+        }
+
+        if !has_name {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected a nonempty relative path without parent components",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Map a validated relative path to the supplied root spelling for tests.
+    /// This path must never be used for filesystem I/O.
+    #[cfg(test)]
     fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
-        todo!()
+        Self::validate(path)?;
+        Ok(self.root.join(path))
     }
 
     #[cfg(test)]
@@ -61,27 +96,45 @@ impl Fs for Dir {
     type Writer = File;
 
     fn create_dir_all(&self, path: &Path) -> Result<()> {
-        todo!()
+        Self::validate(path)?;
+        self.cap_root.create_dir_all(path)
     }
 
     fn create_new(&self, path: &Path) -> Result<Self::Writer> {
-        todo!()
+        Self::validate(path)?;
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        self.cap_root
+            .open_with(path, &options)
+            .map(|file| file.into_std())
     }
 
     fn open_read(&self, path: &Path) -> Result<Self::Reader> {
-        todo!()
+        Self::validate(path)?;
+        self.cap_root.open(path).map(|file| file.into_std())
     }
 
     fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-        todo!()
+        Self::validate(from)?;
+        Self::validate(to)?;
+        self.cap_root.rename(from, &self.cap_root, to)
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
-        todo!()
+        Self::validate(path)?;
+        self.cap_root.remove_file(path)
     }
 
     fn metadata(&self, path: &Path) -> Result<Kind> {
-        todo!()
+        Self::validate(path)?;
+        let kind = self.cap_root.symlink_metadata(path)?.file_type();
+        Ok(if kind.is_file() {
+            Kind::File
+        } else if kind.is_dir() {
+            Kind::Directory
+        } else {
+            Kind::Other
+        })
     }
 }
 
