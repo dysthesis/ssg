@@ -82,8 +82,8 @@ mod tests {
         io::{BufRead, BufReader},
         process::{Command, Stdio},
         sync::{
-            atomic::{AtomicBool, Ordering},
             Arc, Barrier,
+            atomic::{AtomicBool, Ordering},
         },
         thread,
     };

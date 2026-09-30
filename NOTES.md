@@ -1,6 +1,13 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-09-30 10:45
+
+- We'll implmement an `Fs` trait abstracting filesystem behaviour, rather than
+  interacting with `std::fs` directly, so that we can do things like fault
+  injection for testing.
+- [ ] Implement an `Fs` trait for swappable filesystem abstractions.
+
 # 2026-09-29 22:30
 
 - A `Store` can be idealised as a `HashMap`. We can use that to implement
