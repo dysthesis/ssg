@@ -4,7 +4,7 @@ use cap_std::fs::{Dir as CapDir, OpenOptions};
 use std::{
     fs::File,
     io::{self, Read, Result, Write},
-    path::{Component, Path, PathBuf},
+    path::{Component, Path},
 };
 
 /// Filesystem interface for swappable backends, e.g. fault injection.
@@ -36,14 +36,13 @@ pub(crate) enum Kind {
 /// are rejected before filesystem I/O.
 #[derive(Debug)]
 pub struct Dir {
-    root: PathBuf,
     cap_root: CapDir,
 }
 
 impl Dir {
-    /// Open an existing absolute directory, retaining its supplied spelling.
-    /// The spelling is not used for subsequent filesystem I/O.
-    pub(crate) fn new(root: PathBuf) -> io::Result<Self> {
+    /// Open an existing absolute directory as a filesystem capability.
+    /// Later operations use this opened directory, not its supplied pathname.
+    pub(crate) fn new(root: &Path) -> io::Result<Self> {
         if !root.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -51,8 +50,8 @@ impl Dir {
             ));
         }
 
-        let cap_root = CapDir::open_ambient_dir(&root, ambient_authority())?;
-        Ok(Self { root, cap_root })
+        let cap_root = CapDir::open_ambient_dir(root, ambient_authority())?;
+        Ok(Self { cap_root })
     }
 
     #[inline]
@@ -72,18 +71,6 @@ impl Dir {
         }
     }
 
-    /// Map a validated relative path to the supplied root spelling for tests.
-    /// This path must never be used for filesystem I/O.
-    #[cfg(test)]
-    fn resolve(&self, path: &Path) -> io::Result<PathBuf> {
-        Self::validate(path)?;
-        Ok(self.root.join(path))
-    }
-
-    #[cfg(test)]
-    fn root(&self) -> &Path {
-        &self.root
-    }
 }
 
 impl Fs for Dir {
@@ -138,6 +125,7 @@ impl Fs for Dir {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::path::PathBuf;
     use tempdir::TempDir;
     fn relative_path() -> impl Strategy<Value = PathBuf> {
         prop::collection::vec(component(), 1..=4).prop_map(|parts| {
@@ -196,7 +184,7 @@ mod tests {
             }
 
             Ok(_) => {
-                panic!("operation unexpectedly accepted an escaping path");
+                panic!("operation unexpectedly accepted an invalid path");
             }
         }
     }
@@ -205,13 +193,10 @@ mod tests {
     fn empty_path_is_rejected() -> color_eyre::Result<()> {
         let tmp = TempDir::new("dir")?;
         let root = std::path::absolute(tmp.path())?;
-        let dir = Dir::new(root)?;
+        let dir = Dir::new(&root)?;
 
-        let error = dir
-            .resolve(Path::new(""))
-            .expect_err("empty path must be rejected");
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_invalid_input(dir.create_new(Path::new("")));
+        assert!(std::fs::read_dir(&root)?.next().is_none());
 
         Ok(())
     }
@@ -220,13 +205,11 @@ mod tests {
     fn current_directory_path_is_rejected() -> color_eyre::Result<()> {
         let tmp = TempDir::new("dir")?;
         let root = std::path::absolute(tmp.path())?;
-        let dir = Dir::new(root)?;
+        std::fs::write(root.join("sentinel"), b"intact")?;
+        let dir = Dir::new(&root)?;
 
-        let error = dir
-            .resolve(Path::new("."))
-            .expect_err("current-directory path must be rejected");
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert_invalid_input(dir.remove_file(Path::new(".")));
+        assert_eq!(std::fs::read(root.join("sentinel"))?, b"intact");
 
         Ok(())
     }
@@ -234,7 +217,7 @@ mod tests {
     #[test]
     fn current_directory_components_work_in_operations() -> color_eyre::Result<()> {
         let tmp = TempDir::new("dir")?;
-        let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+        let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
 
         dir.create_dir_all(Path::new("./nested/./child"))?;
         let mut writer = dir.create_new(Path::new("./nested/./child/file"))?;
@@ -272,9 +255,11 @@ mod tests {
             prop_assert!(root.is_absolute());
             prop_assert!(root.is_dir());
 
-            let dir = Dir::new(root.clone())?;
-
-            prop_assert_eq!(dir.root(), root.as_path());
+            std::fs::write(root.join("probe"), b"rooted")?;
+            let dir = Dir::new(&root)?;
+            let mut actual = Vec::new();
+            dir.open_read(Path::new("probe"))?.read_to_end(&mut actual)?;
+            prop_assert_eq!(actual.as_slice(), b"rooted");
         }
 
         #[test]
@@ -283,7 +268,7 @@ mod tests {
         ) {
             prop_assume!(!root.exists());
 
-            let error = Dir::new(root).unwrap_err();
+            let error = Dir::new(&root).unwrap_err();
 
             prop_assert_eq!(
                 error.kind(),
@@ -308,7 +293,7 @@ mod tests {
             prop_assert!(relative.is_relative());
             prop_assert!(relative.is_dir());
 
-            let error = Dir::new(relative).unwrap_err();
+            let error = Dir::new(&relative).unwrap_err();
 
             prop_assert_eq!(
                 error.kind(),
@@ -328,7 +313,7 @@ mod tests {
             .unwrap();
 
             prop_assert!(!root.exists());
-            prop_assert!(Dir::new(root).is_err());
+            prop_assert!(Dir::new(&root).is_err());
         }
 
         #[test]
@@ -344,29 +329,11 @@ mod tests {
 
             std::fs::write(&root, &bytes).unwrap();
 
-            prop_assert!(Dir::new(root.clone()).is_err());
+            prop_assert!(Dir::new(&root).is_err());
 
             prop_assert_eq!(
                 std::fs::read(root).unwrap(),
                 bytes
-            );
-        }
-
-        /// Check that [`Dir`] does not rewrite relative paths
-        #[test]
-        fn valid_relative_path_is_preserved(
-            path in relative_path(),
-        ) {
-            let tmp = tempdir::TempDir::new("dir").unwrap();
-            let root = std::path::absolute(tmp.path()).unwrap();
-
-            let dir = Dir::new(root.clone()).unwrap();
-
-            let resolved = dir.resolve(&path).unwrap();
-
-            prop_assert_eq!(
-                resolved.strip_prefix(&root).unwrap(),
-                path.as_path(),
             );
         }
 
@@ -377,15 +344,12 @@ mod tests {
         ) {
             let tmp = tempdir::TempDir::new("dir").unwrap();
             let root = std::path::absolute(tmp.path()).unwrap();
+            let inside = root.join("inside");
+            std::fs::write(&inside, b"protected").unwrap();
+            let dir = Dir::new(&root).unwrap();
 
-            let dir = Dir::new(root).unwrap();
-
-            let error = dir.resolve(&path).unwrap_err();
-
-            prop_assert_eq!(
-                error.kind(),
-                io::ErrorKind::InvalidInput,
-            );
+            assert_invalid_input(dir.rename(Path::new("inside"), &path));
+            prop_assert_eq!(std::fs::read(&inside).unwrap(), b"protected");
         }
 
         #[test]
@@ -394,17 +358,13 @@ mod tests {
         ) {
             let tmp = tempdir::TempDir::new("dir").unwrap();
             let root = std::path::absolute(tmp.path()).unwrap();
-
-            let dir = Dir::new(root.clone()).unwrap();
-
+            let inside = root.join("inside");
+            std::fs::write(&inside, b"protected").unwrap();
+            let dir = Dir::new(&root).unwrap();
             let absolute = root.join(relative);
 
-            let error = dir.resolve(&absolute).unwrap_err();
-
-            prop_assert_eq!(
-                error.kind(),
-                io::ErrorKind::InvalidInput,
-            );
+            assert_invalid_input(dir.rename(Path::new("inside"), &absolute));
+            prop_assert_eq!(std::fs::read(&inside).unwrap(), b"protected");
         }
 
         #[test]
@@ -421,7 +381,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.open_read(&Path::new("..").join(&sibling)));
 
@@ -444,7 +404,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.metadata(&Path::new("..").join(&sibling)));
 
@@ -467,7 +427,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.remove_file(&Path::new("..").join(&sibling)));
 
@@ -490,7 +450,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             prop_assert!(!outside.exists());
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.create_new(&Path::new("..").join(&sibling)));
 
@@ -513,7 +473,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             prop_assert!(!outside.exists());
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.create_dir_all(&Path::new("..").join(&sibling)));
 
@@ -538,7 +498,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             std::fs::write(&outside, &bytes).unwrap();
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.rename(
                 &Path::new("..").join(&sibling),
@@ -565,7 +525,7 @@ mod tests {
             let sibling = format!("outside-{name}");
             let outside = parent.join(&sibling);
             prop_assert!(!outside.exists());
-            let dir = Dir::new(root.clone()).unwrap();
+            let dir = Dir::new(&root).unwrap();
 
             assert_invalid_input(dir.rename(
                 Path::new("inside"),
@@ -582,7 +542,7 @@ mod tests {
         #[test]
         fn create_dir_all_creates_every_component(path in relative_path()) {
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
 
             dir.create_dir_all(&path)?;
 
@@ -596,7 +556,7 @@ mod tests {
         #[test]
         fn create_dir_all_repeatedly_converges(path in relative_path()) {
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
 
             dir.create_dir_all(&path)?;
             dir.create_dir_all(&path)?;
@@ -617,7 +577,7 @@ mod tests {
             use std::thread;
 
             let tmp = TempDir::new("dir")?;
-            let dir = Arc::new(Dir::new(std::path::absolute(tmp.path())?)?);
+            let dir = Arc::new(Dir::new(&std::path::absolute(tmp.path())?)?);
             let barrier = Arc::new(Barrier::new(workers + 1));
             let handles: Vec<_> = (0..workers).map(|_| {
                 let dir = Arc::clone(&dir);
@@ -640,7 +600,7 @@ mod tests {
         #[test]
         fn create_new_writer_roundtrips(name in component(), bytes in any::<Vec<u8>>()) {
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
             let path = Path::new(&name);
 
             let mut writer = dir.create_new(path)?;
@@ -659,7 +619,7 @@ mod tests {
             bytes in any::<Vec<u8>>(),
         ) {
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
             let path = Path::new(&name);
 
             let mut writer = dir.create_new(path)?;
@@ -681,7 +641,7 @@ mod tests {
             use std::thread;
 
             let tmp = TempDir::new("dir")?;
-            let dir = Arc::new(Dir::new(std::path::absolute(tmp.path())?)?);
+            let dir = Arc::new(Dir::new(&std::path::absolute(tmp.path())?)?);
             let barrier = Arc::new(Barrier::new(workers + 1));
             let handles: Vec<_> = (0..workers).map(|_| {
                 let dir = Arc::clone(&dir);
@@ -706,7 +666,7 @@ mod tests {
         #[test]
         fn open_read_preserves_not_found(path in relative_path()) {
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
 
             prop_assert_eq!(dir.open_read(&path).unwrap_err().kind(), io::ErrorKind::NotFound);
         }
@@ -717,7 +677,7 @@ mod tests {
         ) {
             prop_assume!(from != to);
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
             let from = Path::new(&from);
             let to = Path::new(&to);
             let mut writer = dir.create_new(from)?;
@@ -738,7 +698,7 @@ mod tests {
         ) {
             prop_assume!(from != to);
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
             let from = Path::new(&from);
             let to = Path::new(&to);
             let mut source = dir.create_new(from)?;
@@ -762,7 +722,7 @@ mod tests {
         ) {
             prop_assume!(target != sibling);
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
             let target = Path::new(&target);
             let sibling = Path::new(&sibling);
             let mut writer = dir.create_new(target)?;
@@ -783,7 +743,7 @@ mod tests {
         fn kind_distinguishes_file_and_directory(file in component(), directory in component()) {
             prop_assume!(file != directory);
             let tmp = TempDir::new("dir")?;
-            let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+            let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
             drop(dir.create_new(Path::new(&file))?);
             dir.create_dir_all(Path::new(&directory))?;
 
@@ -798,7 +758,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let tmp = TempDir::new("dir")?;
-        let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+        let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
         std::fs::write(tmp.path().join("target"), b"data")?;
         symlink("target", tmp.path().join("link"))?;
 
@@ -812,7 +772,7 @@ mod tests {
         use std::os::unix::fs::symlink;
 
         let tmp = TempDir::new("dir")?;
-        let dir = Dir::new(std::path::absolute(tmp.path())?)?;
+        let dir = Dir::new(&std::path::absolute(tmp.path())?)?;
         let link = tmp.path().join("link");
         let target = tmp.path().join("missing");
         symlink("missing", &link)?;
