@@ -1,6 +1,13 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-09-30 12:00
+
+- We probably don't want to async this if we don't need to? Conjecture is that
+  multithreading would make waiting for I/O cheap -- that thread will just sleep
+  while others work, the OS can deal with it for us. We could bench anyways,
+  though, but later.
+
 # 2026-09-30 10:45
 
 - We'll implmement an `Fs` trait abstracting filesystem behaviour, rather than
