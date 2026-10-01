@@ -1,6 +1,18 @@
 This document is an append-only journal dumping my thoughts and intentions while 
 developing this
 
+# 2026-10-02 11:30
+
+- Conjecture: dependency graph is a sparse matrix, so we might want to run Kahn
+  over a compressed-sparse row.
+  - Some tasks have O(n) dependencies, _e.g._ post indices
+  - Most tasks have O(1), _e.g._ the posts themselves; there are more posts than
+    there are indices
+
+# 2026-10-02 11:00
+
+- Starting to work on Task
+
 # 2026-09-30 12:00
 
 - We probably don't want to async this if we don't need to? Conjecture is that
