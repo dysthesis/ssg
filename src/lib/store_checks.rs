@@ -2,7 +2,7 @@ use super::*;
 use std::{
     fs::File,
     path::Path,
-    sync::{Arc, Mutex, mpsc},
+    sync::{mpsc, Arc, Mutex},
     time::Duration,
 };
 use tempdir::TempDir;
@@ -204,6 +204,9 @@ fn assert_put_error(result: Result<blake3::Hash>, bytes: &[u8], fault: Fault) {
     }
 }
 
+// partial writes and retries need separate expectations
+const NONEMPTY_PUT_EVENTS: &[&str] = &["write", "flush", "sync", "synced", "commit"];
+
 #[test]
 fn collision_and_publication_boundaries() {
     for bytes in [b"complete bytes".as_slice(), b"".as_slice()] {
@@ -228,9 +231,9 @@ fn collision_and_publication_boundaries() {
             b"incumbent sentinel"
         );
         let expected = if bytes.is_empty() {
-            vec!["flush", "sync", "synced", "commit"]
+            &NONEMPTY_PUT_EVENTS[1..] // Empty input omits write.
         } else {
-            vec!["write", "flush", "sync", "synced", "commit"]
+            NONEMPTY_PUT_EVENTS
         };
         assert_eq!(trace.events, expected);
     }
@@ -252,11 +255,10 @@ fn publication_failures_preserve_primary_error_and_cleanup_ownership() {
             false,
         );
         assert_put_error(store.put(bytes), bytes, fault);
-        assert!(
-            !tmp.path()
-                .join(store.object_path(blake3::hash(bytes)))
-                .exists()
-        );
+        assert!(!tmp
+            .path()
+            .join(store.object_path(blake3::hash(bytes)))
+            .exists());
         let trace = store.dir.trace.lock().unwrap();
         assert_eq!(trace.owned.len(), 1);
         assert_eq!(trace.removed, trace.owned);
@@ -265,11 +267,16 @@ fn publication_failures_preserve_primary_error_and_cleanup_ownership() {
             std::fs::read(tmp.path().join(trace.collision.as_ref().unwrap())).unwrap(),
             b"incumbent sentinel"
         );
-        let expected = match fault {
-            Fault::Flush => vec!["write", "flush"],
-            Fault::Sync => vec!["write", "flush", "sync"],
-            Fault::Commit => vec!["write", "flush", "sync", "synced", "commit"],
+        let endpoint = match fault {
+            Fault::Flush => "flush",
+            Fault::Sync => "sync",
+            Fault::Commit => "commit",
         };
+        let end = NONEMPTY_PUT_EVENTS
+            .iter()
+            .position(|&event| event == endpoint)
+            .expect("fault endpoint missing from expected put ordering");
+        let expected = &NONEMPTY_PUT_EVENTS[..=end];
         assert_eq!(trace.events, expected);
     }
 }
@@ -289,11 +296,10 @@ fn failed_cleanup_leaves_an_unpoisoning_orphan() {
         false,
     );
     assert_put_error(store.put(bytes), bytes, Fault::Sync);
-    assert!(
-        !tmp.path()
-            .join(store.object_path(blake3::hash(bytes)))
-            .exists()
-    );
+    assert!(!tmp
+        .path()
+        .join(store.object_path(blake3::hash(bytes)))
+        .exists());
     let orphan = {
         let trace = store.dir.trace.lock().unwrap();
         assert_eq!(trace.owned.len(), 1);
