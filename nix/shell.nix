@@ -17,6 +17,7 @@
         # Rust
         cargo-mutants
         cargo-nextest
+        cargo-llvm-cov
         bacon
         mold # faster linker for dev builds
         clang

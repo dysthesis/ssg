@@ -93,53 +93,6 @@ mod tests {
             .collect()
     }
 
-    #[test]
-    fn relative_object_path_uses_owned_directory() -> io::Result<()> {
-        let tmp = TempDir::new("store")?;
-        let root = std::path::absolute(tmp.path())?;
-        use std::io::Read;
-        for (bytes, shard, suffix) in [
-            ([0; 32], "00", "0".repeat(62)),
-            (
-                std::array::from_fn(|i| i as u8),
-                "00",
-                "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f".to_owned(),
-            ),
-            ([0xab; 32], "ab", "ab".repeat(31)),
-        ] {
-            let store = Store {
-                dir: Dir::new(&root)?,
-            };
-            let path = store.object_path(blake3::Hash::from_bytes(bytes));
-            let expected = Path::new(shard).join(suffix);
-            assert!(path.is_relative());
-            assert_eq!(path, expected);
-            store.dir.create_dir_all(path.parent().unwrap())?;
-            let mut writer = store.dir.create_new(&path)?;
-            writer.write_all(b"original")?;
-            drop(writer);
-            assert_eq!(std::fs::read(root.join(&expected))?, b"original");
-            std::fs::write(root.join(&expected), b"corrupted")?;
-            let mut actual = Vec::new();
-            store.dir.open_read(&path)?.read_to_end(&mut actual)?;
-            assert_eq!(actual, b"corrupted");
-            drop(store);
-            let reopened = Store {
-                dir: Dir::new(&root)?,
-            };
-            actual.clear();
-            reopened.dir.open_read(&path)?.read_to_end(&mut actual)?;
-            assert_eq!(actual, b"corrupted");
-            let unavailable = root.join("unavailable");
-            assert_eq!(
-                Dir::new(&unavailable).unwrap_err().kind(),
-                io::ErrorKind::NotFound
-            );
-            assert!(Op::Reopen.run(&reopened, &unavailable).is_ok());
-        }
-        Ok(())
-    }
-
     /// For modelling arbitrary actions in between our operations of interest
     #[derive(Debug, Arbitrary)]
     enum Op {
@@ -228,6 +181,56 @@ mod tests {
             .prop_map(|set| set.into_iter().collect())
     }
     proptest! {
+        #[test]
+        fn relative_object_path_uses_owned_directory(hash in arb_hash()) {
+            use std::io::Read;
+            let bytes = *hash.as_bytes();
+            let shard = format!("{:02x}", bytes[0]);
+            let suffix: String = bytes[1..].iter().map(|byte| format!("{byte:02x}")).collect();
+            for (bytes, shard, suffix) in [
+                ([0; 32], "00", "0".repeat(62)),
+                (
+                    std::array::from_fn(|i| i as u8),
+                    "00",
+                    "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f".to_owned(),
+                ),
+                ([0xab; 32], "ab", "ab".repeat(31)),
+                (bytes, shard.as_str(), suffix),
+            ] {
+                let tmp = TempDir::new("store")?;
+                let root = std::path::absolute(tmp.path())?;
+                let store = Store {
+                    dir: Dir::new(&root)?,
+                };
+                let path = store.object_path(blake3::Hash::from_bytes(bytes));
+                let expected = Path::new(shard).join(suffix);
+                prop_assert!(path.is_relative());
+                prop_assert_eq!(&path, &expected);
+                store.dir.create_dir_all(path.parent().unwrap())?;
+                let mut writer = store.dir.create_new(&path)?;
+                writer.write_all(b"original")?;
+                drop(writer);
+                prop_assert_eq!(std::fs::read(root.join(&expected))?, b"original");
+                std::fs::write(root.join(&expected), b"corrupted")?;
+                let mut actual = Vec::new();
+                store.dir.open_read(&path)?.read_to_end(&mut actual)?;
+                prop_assert_eq!(&actual, b"corrupted");
+                drop(store);
+                let reopened = Store {
+                    dir: Dir::new(&root)?,
+                };
+                actual.clear();
+                reopened.dir.open_read(&path)?.read_to_end(&mut actual)?;
+                prop_assert_eq!(&actual, b"corrupted");
+                let unavailable = root.join("unavailable");
+                prop_assert_eq!(
+                    Dir::new(&unavailable).unwrap_err().kind(),
+                    io::ErrorKind::NotFound
+                );
+                prop_assert!(Op::Reopen.run(&reopened, &unavailable).is_ok());
+            }
+        }
+
         /// Self-explanatory, putting some bytes should return its hash
         #[test]
         fn put_returns_hash(bytes in any::<Vec<u8>>()) {
