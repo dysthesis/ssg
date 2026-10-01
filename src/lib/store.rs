@@ -1,7 +1,4 @@
-use std::{
-    io::{self, Write},
-    path::PathBuf,
-};
+use std::{io, path::PathBuf};
 
 use crate::fs::{Dir, Fs};
 
@@ -22,32 +19,46 @@ type Result<T> = std::result::Result<T, Error>;
 /// A content-addressable storage used to store intermediate results of the
 /// build
 pub struct Store {
-    dir: Dir,
+    inner: Backend<Dir>,
 }
 
 impl Store {
     /// Initialise an opened directory as the object storage root
     pub fn init(dir: Dir) -> Result<Self> {
-        todo!()
+        Backend::init_with_fs(dir).map(|inner| Self { inner })
     }
     /// Get the bytes stored that is associated with the given key
     pub fn get(&self, key: blake3::Hash) -> Result<Vec<u8>> {
-        todo!()
+        self.inner.get(key)
     }
     /// Put some arbitrary bytes into the store, returning its key.
     pub fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
+        self.inner.put(bytes)
+    }
+}
+
+struct Backend<F> {
+    dir: F,
+}
+
+impl<F: Fs> Backend<F> {
+    fn init_with_fs(dir: F) -> Result<Self> {
+        todo!()
+    }
+
+    fn get(&self, key: blake3::Hash) -> Result<Vec<u8>> {
+        todo!()
+    }
+
+    fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
         let hash = blake3::hash(bytes);
-        let writer = |file: &mut <Dir as Fs>::Writer, bytes: &[u8]| file.write_all(bytes);
-        match self.put_inner(bytes, hash, writer) {
+        match self.put_inner(bytes, hash) {
             Ok(_) => Ok(hash),
             Err(error) => Err(Error::PutError { hash, error }),
         }
     }
 
-    fn put_inner<W>(&self, bytes: &[u8], hash: blake3::Hash, writer: W) -> io::Result<()>
-    where
-        W: FnOnce(&mut <Dir as Fs>::Writer, &[u8]) -> io::Result<()>,
-    {
+    fn put_inner(&self, bytes: &[u8], hash: blake3::Hash) -> io::Result<()> {
         todo!()
     }
 
@@ -62,14 +73,15 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use std::{
-        io::{BufRead, BufReader},
+        io::Write,
         path::Path,
-        process::{Command, Stdio},
+        process::{Child, Command, Stdio},
         sync::{
-            Arc, Barrier,
             atomic::{AtomicBool, Ordering},
+            Arc, Barrier,
         },
         thread,
+        time::{Duration, Instant},
     };
 
     use super::*;
@@ -77,20 +89,280 @@ mod tests {
     use proptest_derive::Arbitrary;
     use tempdir::TempDir;
 
+    type Store = Backend<TestFs>;
+
+    impl Store {
+        fn init(dir: Dir) -> Result<Self> {
+            Self::init_with_fs(TestFs::new(dir))
+        }
+    }
+
+    struct TestFs {
+        dir: Dir,
+        write_limit: Option<usize>,
+        before_rename: Option<PathBuf>,
+    }
+
+    impl TestFs {
+        fn new(dir: Dir) -> Self {
+            Self {
+                dir,
+                write_limit: None,
+                before_rename: None,
+            }
+        }
+    }
+
+    struct TestWriter {
+        file: std::fs::File,
+        remaining: Option<usize>,
+    }
+
+    impl Write for TestWriter {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            if bytes.is_empty() {
+                return Ok(0);
+            }
+            let len = match self.remaining {
+                Some(0) => return Err(injected_error()),
+                Some(remaining) => bytes.len().min(remaining),
+                None => bytes.len(),
+            };
+            let written = self.file.write(&bytes[..len])?;
+            if let Some(remaining) = &mut self.remaining {
+                *remaining -= written;
+            }
+            Ok(written)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.file.flush()
+        }
+    }
+
+    impl Fs for TestFs {
+        type Reader = <Dir as Fs>::Reader;
+        type Writer = TestWriter;
+
+        fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+            self.dir.create_dir_all(path)
+        }
+
+        fn create_new(&self, path: &Path) -> io::Result<Self::Writer> {
+            Ok(TestWriter {
+                file: self.dir.create_new(path)?,
+                remaining: self.write_limit,
+            })
+        }
+
+        fn open_read(&self, path: &Path) -> io::Result<Self::Reader> {
+            self.dir.open_read(path)
+        }
+
+        fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+            if let Some(ready) = &self.before_rename {
+                // Let Dir enforce capability/path checks before signalling.
+                self.dir.metadata(from)?;
+                match self.dir.metadata(to) {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+                let pending = ready.with_extension("pending");
+                std::fs::write(&pending, from.as_os_str().as_encoded_bytes())?;
+                std::fs::rename(pending, ready)?;
+                loop {
+                    thread::park();
+                }
+            }
+            self.dir.rename(from, to)
+        }
+
+        fn remove_file(&self, path: &Path) -> io::Result<()> {
+            self.dir.remove_file(path)
+        }
+
+        fn metadata(&self, path: &Path) -> io::Result<crate::fs::Kind> {
+            self.dir.metadata(path)
+        }
+    }
+
+    struct CrashChild(Child);
+
+    impl Drop for CrashChild {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    fn crash_child(
+        root: &Path,
+        input: &Path,
+        ready: &Path,
+        backend_check: bool,
+    ) -> io::Result<CrashChild> {
+        Command::new(std::env::current_exe()?)
+            .args([
+                "store::tests::duplicate_put_crash_child",
+                "--ignored",
+                "--exact",
+            ])
+            .env("STORE_ROOT", root)
+            .env("STORE_INPUT", input)
+            .env("STORE_READY", ready)
+            .env("STORE_BACKEND_CHECK", if backend_check { "1" } else { "0" })
+            .stdout(Stdio::null())
+            .spawn()
+            .map(CrashChild)
+    }
+
+    fn await_candidate(child: &mut CrashChild, ready: &Path) -> io::Result<PathBuf> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(status) = child.0.try_wait()? {
+                return Err(io::Error::other(format!(
+                    "child exited before readiness: {status}"
+                )));
+            }
+            match std::fs::read_to_string(ready) {
+                Ok(path) if !path.is_empty() => return Ok(PathBuf::from(path)),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "child did not reach rename",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    #[ignore = "subprocess entry point; exercised by crash tests"]
+    fn duplicate_put_crash_child() {
+        let root = PathBuf::from(std::env::var_os("STORE_ROOT").expect("STORE_ROOT"));
+        let bytes = std::fs::read(std::env::var_os("STORE_INPUT").expect("STORE_INPUT")).unwrap();
+        let mut fs = TestFs::new(Dir::new(&root).unwrap());
+        fs.before_rename = Some(PathBuf::from(
+            std::env::var_os("STORE_READY").expect("STORE_READY"),
+        ));
+        if std::env::var("STORE_BACKEND_CHECK").as_deref() == Ok("1") {
+            let mut writer = fs.create_new(Path::new("candidate")).unwrap();
+            writer.write_all(&bytes).unwrap();
+            drop(writer);
+            fs.rename(Path::new("candidate"), Path::new("published"))
+                .unwrap();
+        } else {
+            let store = Store::init_with_fs(fs).unwrap();
+            store.put(&bytes).unwrap();
+        }
+        panic!("paused rename unexpectedly returned");
+    }
+
+    #[test]
+    fn backend_partial_write_limit_is_cumulative() -> io::Result<()> {
+        let tmp = TempDir::new("store")?;
+        let mut fs = TestFs::new(Dir::new(tmp.path())?);
+        fs.write_limit = Some(3);
+        let mut writer = fs.create_new(Path::new("candidate"))?;
+        assert_eq!(writer.write(b"")?, 0);
+        writer.write_all(b"a")?;
+        assert_eq!(writer.write(b"bcde")?, 2);
+        assert_eq!(writer.write(b"")?, 0);
+        assert!(writer.write_all(b"d").is_err());
+        writer.flush()?;
+        drop(writer);
+        assert_eq!(std::fs::read(tmp.path().join("candidate"))?, b"abc");
+        let mut writer = fs.create_new(Path::new("write-all"))?;
+        assert!(writer.write_all(b"abcdef").is_err());
+        drop(writer);
+        assert_eq!(std::fs::read(tmp.path().join("write-all"))?, b"abc");
+        fs.write_limit = Some(0);
+        let mut writer = fs.create_new(Path::new("zero"))?;
+        assert_eq!(writer.write(b"")?, 0);
+        assert!(writer.write(b"a").is_err());
+        assert_eq!(std::fs::metadata(tmp.path().join("zero"))?.len(), 0);
+        Ok(())
+    }
+
+    #[test]
+    fn backend_pause_precedes_rename_and_kill_leaves_candidate() -> io::Result<()> {
+        let tmp = TempDir::new("store")?;
+        let signal = TempDir::new("store-signal")?;
+        let ready = signal.path().join("ready");
+        let input = signal.path().join("input");
+        std::fs::write(&input, b"complete")?;
+        let mut child = crash_child(tmp.path(), &input, &ready, true)?;
+        let candidate = await_candidate(&mut child, &ready)?;
+        assert_eq!(candidate, Path::new("candidate"));
+        assert_eq!(std::fs::read(tmp.path().join(&candidate))?, b"complete");
+        assert!(!tmp.path().join("published").exists());
+        child.0.kill()?;
+        assert!(!child.0.wait()?.success());
+        assert_eq!(std::fs::read(tmp.path().join(&candidate))?, b"complete");
+        let fs = TestFs::new(Dir::new(tmp.path())?);
+        fs.rename(&candidate, Path::new("published"))?;
+        assert_eq!(std::fs::read(tmp.path().join("published"))?, b"complete");
+        Ok(())
+    }
+
     fn objects(root: &Path) -> color_eyre::Result<Vec<blake3::Hash>> {
         use color_eyre::eyre::bail;
-        std::fs::read_dir(root)?
-            .map(|entry| {
+        let mut hashes = Vec::new();
+        for shard in std::fs::read_dir(root)? {
+            let shard = shard?;
+            let prefix = shard.file_name();
+            let Some(prefix) = prefix
+                .to_str()
+                .filter(|name| name.len() == 2 && name.bytes().all(|b| b.is_ascii_hexdigit()))
+            else {
+                continue;
+            };
+            if !shard.file_type()?.is_dir() {
+                bail!("unexpected non-directory shard: {:?}", shard.path());
+            }
+            for entry in std::fs::read_dir(shard.path())? {
                 let entry = entry?;
-
+                let suffix = entry.file_name();
+                let Some(suffix) = suffix
+                    .to_str()
+                    .filter(|name| name.len() == 62 && name.bytes().all(|b| b.is_ascii_hexdigit()))
+                else {
+                    continue;
+                };
                 if !entry.file_type()?.is_file() {
-                    bail!("unexpected non-file entry: {:?}", entry.path());
+                    bail!("unexpected non-file object: {:?}", entry.path());
                 }
+                hashes.push(blake3::Hash::from_hex(format!("{prefix}{suffix}"))?);
+            }
+        }
+        Ok(hashes)
+    }
 
-                let name = entry.file_name();
-                blake3::Hash::from_hex(name.as_encoded_bytes()).map_err(Into::into)
-            })
-            .collect()
+    #[test]
+    fn object_enumeration_reconstructs_sharded_hashes() -> color_eyre::Result<()> {
+        let tmp = TempDir::new("store")?;
+        let store = Store {
+            dir: TestFs::new(Dir::new(tmp.path())?),
+        };
+        assert!(objects(tmp.path())?.is_empty());
+        Op::GetExisting(0).run(&store, tmp.path())?;
+        let expected = [blake3::Hash::from_bytes([0; 32]), blake3::hash(b"object")];
+        for hash in expected {
+            let path = tmp.path().join(store.object_path(hash));
+            std::fs::create_dir_all(path.parent().unwrap())?;
+            std::fs::write(path, b"object")?;
+        }
+        std::fs::write(tmp.path().join("input"), b"ignored")?;
+        std::fs::write(tmp.path().join("00/candidate"), b"ignored")?;
+        let actual = objects(tmp.path())?;
+        assert_eq!(actual.len(), expected.len());
+        assert!(expected.iter().all(|hash| actual.contains(hash)));
+        Ok(())
     }
 
     /// For modelling arbitrary actions in between our operations of interest
@@ -114,6 +386,9 @@ mod tests {
                 }
                 Op::GetExisting(idx) => {
                     let objects = objects(root).unwrap();
+                    if objects.is_empty() {
+                        return Ok(());
+                    }
                     let clamped = idx % objects.len();
                     let key = objects.get(clamped).expect("idx is a valid index");
                     let _ = store.get(*key);
@@ -200,7 +475,7 @@ mod tests {
                 let tmp = TempDir::new("store")?;
                 let root = std::path::absolute(tmp.path())?;
                 let store = Store {
-                    dir: Dir::new(&root)?,
+                    dir: TestFs::new(Dir::new(&root)?),
                 };
                 let path = store.object_path(blake3::Hash::from_bytes(bytes));
                 let expected = Path::new(shard).join(suffix);
@@ -217,7 +492,7 @@ mod tests {
                 prop_assert_eq!(&actual, b"corrupted");
                 drop(store);
                 let reopened = Store {
-                    dir: Dir::new(&root)?,
+                    dir: TestFs::new(Dir::new(&root)?),
                 };
                 actual.clear();
                 reopened.dir.open_read(&path)?.read_to_end(&mut actual)?;
@@ -439,7 +714,7 @@ mod tests {
             prop_assume!(left != right);
 
             let tmp = TempDir::new("test")?;
-            let store = Store::init(Dir::new(tmp.path())?)?;
+            let store = Store { dir: TestFs::new(Dir::new(tmp.path())?) };
 
             let left_path = store.object_path(left);
             let right_path = store.object_path(right);
@@ -453,7 +728,7 @@ mod tests {
             hash in hash_with_leading_zeroes(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(Dir::new(tmp.path())?)?;
+            let store = Store { dir: TestFs::new(Dir::new(tmp.path())?) };
 
             let path = store.object_path(hash);
 
@@ -463,9 +738,12 @@ mod tests {
                 .to_str()
                 .unwrap();
 
-            prop_assert_eq!(filename.len(), 64);
-
-            let decoded = blake3::Hash::from_hex(filename).unwrap();
+            prop_assert_eq!(filename.len(), 62);
+            let shard = path.parent().unwrap().to_str().unwrap();
+            prop_assert_eq!(shard.len(), 2);
+            let hex = format!("{shard}{filename}");
+            prop_assert_eq!(hex.len(), 64);
+            let decoded = blake3::Hash::from_hex(hex).unwrap();
 
             prop_assert_eq!(decoded, hash);
         }
@@ -475,7 +753,7 @@ mod tests {
             hash in arb_hash(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(Dir::new(tmp.path())?)?;
+            let store = Store { dir: TestFs::new(Dir::new(tmp.path())?) };
             let path = store.object_path(hash);
 
             let relative =
@@ -516,23 +794,24 @@ mod tests {
             (bytes, prefix_len) in object_and_proper_prefix(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(Dir::new(tmp.path())?)?;
+            let mut fs = TestFs::new(Dir::new(tmp.path())?);
+            fs.write_limit = Some(prefix_len);
+            let store = Store::init_with_fs(fs)?;
             let hash = blake3::hash(&bytes);
-
-            let writer = |file: &mut <Dir as Fs>::Writer, bytes: &[u8]| {
-                file.write_all(&bytes[..prefix_len])?;
-                Err(injected_error())
-            };
-            let result = store.put_inner(
-                &bytes,
-                hash,
-                writer
-            );
+            let result = store.put(&bytes);
 
             prop_assert!(result.is_err());
 
             // The logical object must not exist.
             prop_assert!(store.get(hash).is_err());
+            prop_assert_eq!(
+                std::fs::symlink_metadata(tmp.path().join(store.object_path(hash)))
+                    .unwrap_err().kind(),
+                io::ErrorKind::NotFound,
+            );
+            drop(store);
+            let reopened = Store::init(Dir::new(tmp.path())?)?;
+            prop_assert!(reopened.get(hash).is_err());
         }
         /// Multiple concurrent puts of the same bytes yields correct, identical
         /// objects and keys
@@ -749,40 +1028,31 @@ mod tests {
             let temp = TempDir::new("store").unwrap();
 
             let root = temp.path().to_path_buf();
-            let input = root.join("input");
+            let signal = TempDir::new("store-signal").unwrap();
+            let input = signal.path().join("input");
+            let ready = signal.path().join("ready");
 
             std::fs::write(&input, &bytes).unwrap();
 
-            let mut child = Command::new(
-                std::env::current_exe().unwrap()
-            )
-            .arg("duplicate_put_crash_child")
-            .arg("--ignored")
-            .arg("--exact")
-            .env("STORE_ROOT", &root)
-            .env("STORE_INPUT", &input)
-            .env("STORE_PAUSEPOINT", "before-rename")
-            .stdout(Stdio::piped())
-            .spawn()
-            .unwrap();
-
-            let stdout = child.stdout.take().unwrap();
-            let mut stdout = BufReader::new(stdout);
-
-            let mut line = String::new();
-            stdout.read_line(&mut line).unwrap();
-
-            prop_assert_eq!(line.trim(), "READY");
+            let mut child = crash_child(&root, &input, &ready, false).unwrap();
+            let candidate = await_candidate(&mut child, &ready).unwrap();
 
             // The first writer now has an abandoned candidate immediately
             // before publication.
             let store = Store::init(Dir::new(&root).unwrap()).unwrap();
 
             let expected = blake3::hash(&bytes);
+            prop_assert_eq!(&std::fs::read(root.join(&candidate)).unwrap(), &bytes);
+            prop_assert_eq!(
+                std::fs::symlink_metadata(root.join(store.object_path(expected)))
+                    .unwrap_err().kind(),
+                io::ErrorKind::NotFound,
+            );
 
             // Kill the first writer without cleanup.
-            child.kill().unwrap();
-            child.wait().unwrap();
+            child.0.kill().unwrap();
+            prop_assert!(!child.0.wait().unwrap().success());
+            prop_assert_eq!(&std::fs::read(root.join(&candidate)).unwrap(), &bytes);
 
             // A second writer must still be able to establish the object.
             let actual = store.put(&bytes).unwrap();
