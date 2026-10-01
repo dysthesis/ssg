@@ -1,8 +1,9 @@
 use std::{
-    fs,
     io::{self, Write},
     path::PathBuf,
 };
+
+use crate::fs::{Dir, Fs};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -21,12 +22,12 @@ type Result<T> = std::result::Result<T, Error>;
 /// A content-addressable storage used to store intermediate results of the
 /// build
 pub struct Store {
-    pub path: PathBuf,
+    dir: Dir,
 }
 
 impl Store {
-    /// Initialise a given path as the object storage path
-    pub fn init(path: PathBuf) -> Result<Self> {
+    /// Initialise an opened directory as the object storage root
+    pub fn init(dir: Dir) -> Result<Self> {
         todo!()
     }
     /// Get the bytes stored that is associated with the given key
@@ -36,7 +37,7 @@ impl Store {
     /// Put some arbitrary bytes into the store, returning its key.
     pub fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
         let hash = blake3::hash(bytes);
-        let writer = |file: &mut fs::File, bytes: &[u8]| file.write_all(bytes);
+        let writer = |file: &mut <Dir as Fs>::Writer, bytes: &[u8]| file.write_all(bytes);
         match self.put_inner(bytes, hash, writer) {
             Ok(_) => Ok(hash),
             Err(error) => Err(Error::PutError { hash, error }),
@@ -45,34 +46,16 @@ impl Store {
 
     fn put_inner<W>(&self, bytes: &[u8], hash: blake3::Hash, writer: W) -> io::Result<()>
     where
-        W: FnOnce(&mut fs::File, &[u8]) -> io::Result<()>,
+        W: FnOnce(&mut <Dir as Fs>::Writer, &[u8]) -> io::Result<()>,
     {
         todo!()
-    }
-
-    #[cfg(test)]
-    pub fn objects(&self) -> color_eyre::Result<Vec<blake3::Hash>> {
-        use color_eyre::eyre::bail;
-        use std::fs;
-        fs::read_dir(self.path.clone())?
-            .map(|entry| {
-                let entry = entry?;
-
-                if !entry.file_type()?.is_file() {
-                    bail!("unexpected non-file entry: {:?}", entry.path());
-                }
-
-                let name = entry.file_name();
-                blake3::Hash::from_hex(name.as_encoded_bytes()).map_err(Into::into)
-            })
-            .collect()
     }
 
     #[inline]
     fn object_path(&self, hash: blake3::Hash) -> PathBuf {
         let hex = hash.to_hex();
 
-        self.path.join(&hex[..2]).join(&hex[2..])
+        PathBuf::from(&hex[..2]).join(&hex[2..])
     }
 }
 
@@ -80,6 +63,7 @@ impl Store {
 mod tests {
     use std::{
         io::{BufRead, BufReader},
+        path::Path,
         process::{Command, Stdio},
         sync::{
             Arc, Barrier,
@@ -93,6 +77,69 @@ mod tests {
     use proptest_derive::Arbitrary;
     use tempdir::TempDir;
 
+    fn objects(root: &Path) -> color_eyre::Result<Vec<blake3::Hash>> {
+        use color_eyre::eyre::bail;
+        std::fs::read_dir(root)?
+            .map(|entry| {
+                let entry = entry?;
+
+                if !entry.file_type()?.is_file() {
+                    bail!("unexpected non-file entry: {:?}", entry.path());
+                }
+
+                let name = entry.file_name();
+                blake3::Hash::from_hex(name.as_encoded_bytes()).map_err(Into::into)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn relative_object_path_uses_owned_directory() -> io::Result<()> {
+        let tmp = TempDir::new("store")?;
+        let root = std::path::absolute(tmp.path())?;
+        use std::io::Read;
+        for (bytes, shard, suffix) in [
+            ([0; 32], "00", "0".repeat(62)),
+            (
+                std::array::from_fn(|i| i as u8),
+                "00",
+                "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f".to_owned(),
+            ),
+            ([0xab; 32], "ab", "ab".repeat(31)),
+        ] {
+            let store = Store {
+                dir: Dir::new(&root)?,
+            };
+            let path = store.object_path(blake3::Hash::from_bytes(bytes));
+            let expected = Path::new(shard).join(suffix);
+            assert!(path.is_relative());
+            assert_eq!(path, expected);
+            store.dir.create_dir_all(path.parent().unwrap())?;
+            let mut writer = store.dir.create_new(&path)?;
+            writer.write_all(b"original")?;
+            drop(writer);
+            assert_eq!(std::fs::read(root.join(&expected))?, b"original");
+            std::fs::write(root.join(&expected), b"corrupted")?;
+            let mut actual = Vec::new();
+            store.dir.open_read(&path)?.read_to_end(&mut actual)?;
+            assert_eq!(actual, b"corrupted");
+            drop(store);
+            let reopened = Store {
+                dir: Dir::new(&root)?,
+            };
+            actual.clear();
+            reopened.dir.open_read(&path)?.read_to_end(&mut actual)?;
+            assert_eq!(actual, b"corrupted");
+            let unavailable = root.join("unavailable");
+            assert_eq!(
+                Dir::new(&unavailable).unwrap_err().kind(),
+                io::ErrorKind::NotFound
+            );
+            assert!(Op::Reopen.run(&reopened, &unavailable).is_ok());
+        }
+        Ok(())
+    }
+
     /// For modelling arbitrary actions in between our operations of interest
     #[derive(Debug, Arbitrary)]
     enum Op {
@@ -103,7 +150,7 @@ mod tests {
     }
 
     impl Op {
-        pub fn run(&self, store: &Store) -> Result<()> {
+        pub fn run(&self, store: &Store, root: &Path) -> Result<()> {
             match self {
                 Op::Put(bytes) => {
                     store.put(bytes)?;
@@ -113,13 +160,15 @@ mod tests {
                     store.get(hash)?;
                 }
                 Op::GetExisting(idx) => {
-                    let objects = store.objects().unwrap();
+                    let objects = objects(root).unwrap();
                     let clamped = idx % objects.len();
                     let key = objects.get(clamped).expect("idx is a valid index");
                     let _ = store.get(*key);
                 }
                 Op::Reopen => {
-                    let _ = Store::init(store.path.clone());
+                    if let Ok(dir) = Dir::new(root) {
+                        let _ = Store::init(dir);
+                    }
                 }
             }
             Ok(())
@@ -183,7 +232,7 @@ mod tests {
         #[test]
         fn put_returns_hash(bytes in any::<Vec<u8>>()) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let key = store.put(&bytes)?;
             let expected = blake3::hash(&bytes);
@@ -194,7 +243,7 @@ mod tests {
         #[test]
         fn put_get_roundtrips(bytes in any::<Vec<u8>>()) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let key = store.put(&bytes)?;
             let obtained = store.get(key)?;
@@ -205,7 +254,7 @@ mod tests {
         #[test]
         fn get_verifies_hash(bytes in any::<Vec<u8>>()) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let key = store.put(&bytes)?;
             let obtained = store.get(key)?;
@@ -220,7 +269,7 @@ mod tests {
             // we'll just hash it
             let nonexistent = blake3::hash(&bytes);
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let obtained = store.get(nonexistent);
             prop_assert!(obtained.is_err());
         }
@@ -230,15 +279,15 @@ mod tests {
         #[test]
         fn object_id_is_immutable(bytes in any::<Vec<u8>>(), ops in any::<Vec<Op>>()) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let key = store.put(&bytes)?;
 
             for op in ops {
-                let _ = op.run(&store);
+                let _ = op.run(&store, tmp.path());
             }
             drop(store);
 
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let obtained = store.get(key)?;
             prop_assert_eq!(obtained, bytes);
         }
@@ -247,7 +296,7 @@ mod tests {
         #[test]
         fn objects_roundtrip_in_boundary(bytes in boundary_sized_bytes()) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let hash = store.put(&bytes).unwrap();
             let actual = store.get(hash).unwrap();
             prop_assert_eq!(actual, bytes);
@@ -257,7 +306,7 @@ mod tests {
         #[test]
         fn put_idempotence(bytes in any::<Vec<u8>>(), reps in 2usize..1000) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let attempts = (0..reps).map(|_| store.put(&bytes).unwrap()).collect::<Vec<_>>();
             // All attempts must yield the same
@@ -268,7 +317,7 @@ mod tests {
         #[test]
         fn get_idemptotence(bytes in any::<Vec<u8>>(), reps in 2usize..1000) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let key = store.put(&bytes)?;
 
             let attempts = (0..reps).map(|_| store.get(key).unwrap()).collect::<Vec<_>>();
@@ -286,17 +335,17 @@ mod tests {
             prop_assume!(blake3::hash(&original) != blake3::hash(&replacement));
 
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let hash = store.put(&original).unwrap();
 
             std::fs::write(
-                store.object_path(hash),
+                tmp.path().join(store.object_path(hash)),
                 &replacement,
             ).unwrap();
 
             drop(store);
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             prop_assert!(store.get(hash).is_err());
         }
@@ -308,10 +357,10 @@ mod tests {
             numerator in any::<usize>(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let hash = store.put(&bytes).unwrap();
-            let path = store.object_path(hash);
+            let path = tmp.path().join(store.object_path(hash));
 
             let new_len = numerator % bytes.len();
 
@@ -323,7 +372,7 @@ mod tests {
             file.set_len(new_len as u64).unwrap();
 
             drop(store);
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             prop_assert!(store.get(hash).is_err());
         }
@@ -334,10 +383,10 @@ mod tests {
             (bytes, indices) in corrupted_object(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let hash = store.put(&bytes).unwrap();
-            let path = store.object_path(hash);
+            let path = tmp.path().join(store.object_path(hash));
 
             let mut corrupted = bytes.clone();
 
@@ -362,13 +411,13 @@ mod tests {
             prop_assume!(x_hash != y_hash);
 
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let actual_hash = store.put(&x).unwrap();
             prop_assert_eq!(actual_hash, x_hash);
 
             std::fs::write(
-                store.object_path(x_hash),
+                tmp.path().join(store.object_path(x_hash)),
                 &y,
             )
             .unwrap();
@@ -387,7 +436,7 @@ mod tests {
             prop_assume!(left != right);
 
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let left_path = store.object_path(left);
             let right_path = store.object_path(right);
@@ -401,7 +450,7 @@ mod tests {
             hash in hash_with_leading_zeroes(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
 
             let path = store.object_path(hash);
 
@@ -423,11 +472,13 @@ mod tests {
             hash in arb_hash(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let path = store.object_path(hash);
 
             let relative =
-                path.strip_prefix(store.path).unwrap();
+                tmp.path().join(path);
+
+            let relative = relative.strip_prefix(tmp.path()).unwrap();
 
             let mut components =
                 relative.components();
@@ -462,10 +513,10 @@ mod tests {
             (bytes, prefix_len) in object_and_proper_prefix(),
         ) {
             let tmp = TempDir::new("test")?;
-            let store = Store::init(tmp.path().to_path_buf())?;
+            let store = Store::init(Dir::new(tmp.path())?)?;
             let hash = blake3::hash(&bytes);
 
-            let writer = |file: &mut fs::File, bytes: &[u8]| {
+            let writer = |file: &mut <Dir as Fs>::Writer, bytes: &[u8]| {
                 file.write_all(&bytes[..prefix_len])?;
                 Err(injected_error())
             };
@@ -490,7 +541,7 @@ mod tests {
             let temp = TempDir::new("store").unwrap();
 
             let store = Arc::new(
-                Store::init(temp.path().to_path_buf()).unwrap()
+                Store::init(Dir::new(temp.path()).unwrap()).unwrap()
             );
 
             let barrier = Arc::new(Barrier::new(writers + 1));
@@ -535,7 +586,7 @@ mod tests {
             let temp = TempDir::new("store").unwrap();
 
             let store = Arc::new(
-                Store::init(temp.path().to_path_buf()).unwrap()
+                Store::init(Dir::new(temp.path()).unwrap()).unwrap()
             );
 
             let expected: Vec<_> = objects
@@ -601,7 +652,7 @@ mod tests {
             let temp = TempDir::new("store").unwrap();
 
             let store = Arc::new(
-                Store::init(temp.path().to_path_buf()).unwrap()
+                Store::init(Dir::new(temp.path()).unwrap()).unwrap()
             );
 
             let hash = blake3::hash(&bytes);
@@ -722,7 +773,7 @@ mod tests {
 
             // The first writer now has an abandoned candidate immediately
             // before publication.
-            let store = Store::init(root.clone()).unwrap();
+            let store = Store::init(Dir::new(&root).unwrap()).unwrap();
 
             let expected = blake3::hash(&bytes);
 
@@ -738,7 +789,7 @@ mod tests {
             drop(store);
 
             // Verify from a fresh handle, not process-local state.
-            let store = Store::init(root).unwrap();
+            let store = Store::init(Dir::new(&root).unwrap()).unwrap();
 
             prop_assert_eq!(
                 store.get(expected).unwrap(),

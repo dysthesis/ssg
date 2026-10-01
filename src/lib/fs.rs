@@ -42,7 +42,7 @@ pub struct Dir {
 impl Dir {
     /// Open an existing absolute directory as a filesystem capability.
     /// Later operations use this opened directory, not its supplied pathname.
-    pub(crate) fn new(root: &Path) -> io::Result<Self> {
+    pub fn new(root: &Path) -> io::Result<Self> {
         if !root.is_absolute() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
