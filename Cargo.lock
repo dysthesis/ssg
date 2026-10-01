@@ -561,6 +561,7 @@ dependencies = [
  "color-eyre",
  "proptest",
  "proptest-derive",
+ "rustix",
  "tempdir",
  "thiserror",
 ]

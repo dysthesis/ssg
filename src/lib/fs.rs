@@ -16,8 +16,24 @@ pub(crate) trait Fs: Send + Sync {
     fn create_new(&self, path: &Path) -> Result<Self::Writer>;
     fn open_read(&self, path: &Path) -> Result<Self::Reader>;
     fn rename(&self, from: &Path, to: &Path) -> Result<()>;
+    /// Synchronise the writer's file data and metadata to storage. This does
+    /// not synchronise the containing directory entry.
+    fn sync(&self, file: &mut Self::Writer) -> Result<()>;
+    /// Atomically move `staging` to `final_path` without replacing any existing
+    /// destination entry. On [`Outcome::Existing`], both entries are unchanged;
+    /// on [`Outcome::Created`], the staging entry is moved.
+    /// Returns `Unsupported` where no sufficient atomic primitive exists.
+    fn commit(&self, staging: &Path, final_path: &Path) -> Result<Outcome>;
     fn remove_file(&self, path: &Path) -> Result<()>;
     fn metadata(&self, path: &Path) -> Result<Kind>;
+}
+
+/// The outcome of [`Fs::commit`]
+pub(crate) enum Outcome {
+    /// The staging entry was moved to the destination.
+    Created,
+    /// A destination entry already existed.
+    Existing,
 }
 
 /// The kind of a given filesystem object. For now, we only care about files and
@@ -55,7 +71,7 @@ impl Dir {
     }
 
     #[inline]
-    fn validate(path: &Path) -> io::Result<()> {
+    pub(crate) fn validate(path: &Path) -> io::Result<()> {
         let mut components = path
             .components()
             .filter(|component| *component != Component::CurDir);
@@ -69,6 +85,28 @@ impl Dir {
                 "expected a nonempty relative path without parent components",
             ))
         }
+    }
+
+    // Return the parent, the raw source leaf, and the destination leaf with
+    // trailing slashes removed, matching cap-std's rename path handling.
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
+    fn split_commit_path(path: &Path) -> (&Path, &std::ffi::OsStr, &std::ffi::OsStr) {
+        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+        let bytes = path.as_os_str().as_bytes();
+        let end = bytes
+            .iter()
+            .rposition(|&byte| byte != b'/')
+            .map_or(0, |index| index + 1);
+        let start = bytes[..end]
+            .iter()
+            .rposition(|&byte| byte == b'/')
+            .map_or(0, |index| index + 1);
+        (
+            Path::new(OsStr::from_bytes(&bytes[..start])),
+            OsStr::from_bytes(&bytes[start..]),
+            OsStr::from_bytes(&bytes[start..end]),
+        )
     }
 }
 
@@ -100,6 +138,71 @@ impl Fs for Dir {
         Self::validate(from)?;
         Self::validate(to)?;
         self.cap_root.rename(from, &self.cap_root, to)
+    }
+
+    fn sync(&self, file: &mut Self::Writer) -> Result<()> {
+        #[cfg(target_vendor = "apple")]
+        {
+            rustix::fs::fcntl_fullfsync(&*file).map_err(Into::into)
+        }
+        #[cfg(all(not(windows), not(target_vendor = "apple")))]
+        {
+            rustix::fs::fsync(&*file).map_err(Into::into)
+        }
+        #[cfg(windows)]
+        {
+            file.sync_all()
+        }
+    }
+
+    fn commit(&self, staging: &Path, final_path: &Path) -> Result<Outcome> {
+        Self::validate(staging)?;
+        Self::validate(final_path)?;
+
+        #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
+        {
+            use rustix::fs::{renameat_with, RenameFlags};
+
+            let (from_parent, from_leaf, _) = Self::split_commit_path(staging);
+            let (to_parent, _, to_leaf) = Self::split_commit_path(final_path);
+            let from_dir = if from_parent
+                .components()
+                .all(|component| component == Component::CurDir)
+            {
+                None
+            } else {
+                Some(self.cap_root.open_dir(from_parent)?)
+            };
+
+            let to_dir = if to_parent == from_parent
+                || to_parent
+                    .components()
+                    .all(|component| component == Component::CurDir)
+            {
+                None
+            } else {
+                Some(self.cap_root.open_dir(to_parent)?)
+            };
+            let from_dir = from_dir.as_ref().unwrap_or(&self.cap_root);
+            let to_dir = if to_parent == from_parent {
+                from_dir
+            } else {
+                to_dir.as_ref().unwrap_or(&self.cap_root)
+            };
+
+            match renameat_with(from_dir, from_leaf, to_dir, to_leaf, RenameFlags::NOREPLACE) {
+                Ok(()) => Ok(Outcome::Created),
+                Err(rustix::io::Errno::EXIST) => Ok(Outcome::Existing),
+                Err(error) => Err(error.into()),
+            }
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "redox")))]
+        {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "atomic no-replace semantics are unavailable on this platform",
+            ))
+        }
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
@@ -1261,5 +1364,298 @@ mod tests {
             io::ErrorKind::NotFound
         );
         Ok(())
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "redox")))]
+    #[test]
+    fn unsupported_commit_validates_without_mutating_entries() -> io::Result<()> {
+        let tmp = TempDir::new("dir")?;
+        let root = tmp.path();
+        let dir = Dir::new(&std::path::absolute(root)?)?;
+        std::fs::write(root.join("candidate"), b"staging")?;
+        std::fs::write(root.join("published"), b"destination")?;
+
+        let error = match dir.commit(Path::new("candidate"), Path::new("published")) {
+            Err(error) => error,
+            Ok(_) => panic!("unsupported commit unexpectedly succeeded"),
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_invalid_input(dir.commit(Path::new("../outside"), Path::new("published")));
+        assert_invalid_input(dir.commit(Path::new("candidate"), Path::new("../outside")));
+        assert_eq!(std::fs::read(root.join("candidate"))?, b"staging");
+        assert_eq!(std::fs::read(root.join("published"))?, b"destination");
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
+    mod commit_tests {
+        use super::*;
+        use std::sync::Barrier;
+
+        #[test]
+        fn created_moves_staging_and_existing_preserves_both_entries() -> io::Result<()> {
+            let tmp = TempDir::new("dir")?;
+            let root = tmp.path();
+            let dir = Dir::new(&std::path::absolute(root)?)?;
+            std::fs::write(root.join("candidate"), b"first")?;
+
+            assert!(matches!(
+                dir.commit(Path::new("./candidate"), Path::new("./published"))?,
+                Outcome::Created
+            ));
+            assert_eq!(std::fs::read(root.join("published"))?, b"first");
+            assert_eq!(
+                std::fs::symlink_metadata(root.join("candidate"))
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::NotFound
+            );
+
+            assert!(matches!(
+                dir.commit(Path::new("published"), Path::new("published"))?,
+                Outcome::Existing
+            ));
+            assert_eq!(std::fs::read(root.join("published"))?, b"first");
+
+            std::fs::write(root.join("other"), b"second")?;
+            assert!(matches!(
+                dir.commit(Path::new("other"), Path::new("published"))?,
+                Outcome::Existing
+            ));
+            assert_eq!(std::fs::read(root.join("other"))?, b"second");
+            assert_eq!(std::fs::read(root.join("published"))?, b"first");
+
+            std::fs::create_dir(root.join("directory"))?;
+            assert!(matches!(
+                dir.commit(Path::new("other"), Path::new("directory"))?,
+                Outcome::Existing
+            ));
+            assert!(root.join("directory").is_dir());
+            assert_eq!(std::fs::read(root.join("other"))?, b"second");
+            Ok(())
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn trailing_directory_components_are_respected() -> io::Result<()> {
+            use std::os::unix::fs::symlink;
+
+            let tmp = TempDir::new("dir")?;
+            let root = tmp.path();
+            let dir = Dir::new(&std::path::absolute(root)?)?;
+            std::fs::write(root.join("candidate"), b"candidate")?;
+
+            for source in ["candidate/", "candidate/."] {
+                assert!(dir
+                    .commit(Path::new(source), Path::new("published"))
+                    .is_err());
+                assert_eq!(std::fs::read(root.join("candidate"))?, b"candidate");
+                assert_absent(&root.join("published"));
+            }
+            assert!(dir
+                .commit(Path::new("candidate"), Path::new("published/."))
+                .is_err());
+            assert_eq!(std::fs::read(root.join("candidate"))?, b"candidate");
+            assert_absent(&root.join("published"));
+
+            std::fs::create_dir(root.join("directory"))?;
+            symlink("directory", root.join("link"))?;
+            assert!(dir
+                .commit(Path::new("link/."), Path::new("published"))
+                .is_err());
+            assert_eq!(
+                std::fs::read_link(root.join("link"))?,
+                Path::new("directory")
+            );
+            assert!(root.join("directory").is_dir());
+            assert_absent(&root.join("published"));
+
+            assert!(matches!(
+                dir.commit(Path::new("candidate"), Path::new("published/"))?,
+                Outcome::Created
+            ));
+            assert_absent(&root.join("candidate"));
+            assert_eq!(std::fs::read(root.join("published"))?, b"candidate");
+            Ok(())
+        }
+
+        #[test]
+        fn competing_commits_preserve_every_loser() -> io::Result<()> {
+            let tmp = TempDir::new("dir")?;
+            let root = tmp.path();
+            let dir = Dir::new(&std::path::absolute(root)?)?;
+            let stages: Vec<_> = (0..4).map(|i| format!("candidate-{i}")).collect();
+            for (i, stage) in stages.iter().enumerate() {
+                std::fs::write(root.join(stage), [i as u8])?;
+            }
+            let barrier = Barrier::new(stages.len() + 1);
+            let results = std::thread::scope(|scope| {
+                let handles: Vec<_> = stages
+                    .iter()
+                    .map(|stage| {
+                        let dir = &dir;
+                        let barrier = &barrier;
+                        scope.spawn(move || {
+                            barrier.wait();
+                            dir.commit(Path::new(stage), Path::new("published"))
+                        })
+                    })
+                    .collect();
+                barrier.wait();
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .collect::<Vec<_>>()
+            });
+
+            let mut winners = 0;
+            for (i, (stage, result)) in stages.iter().zip(results).enumerate() {
+                match result? {
+                    Outcome::Created => {
+                        winners += 1;
+                        assert_eq!(std::fs::read(root.join("published"))?, [i as u8]);
+                        assert_eq!(
+                            std::fs::symlink_metadata(root.join(stage))
+                                .unwrap_err()
+                                .kind(),
+                            io::ErrorKind::NotFound
+                        );
+                    }
+                    Outcome::Existing => {
+                        assert_eq!(std::fs::read(root.join(stage))?, [i as u8]);
+                    }
+                }
+            }
+            assert_eq!(winners, 1);
+            Ok(())
+        }
+
+        #[test]
+        fn both_paths_are_validated_before_filesystem_access() -> io::Result<()> {
+            let tmp = TempDir::new("dir")?;
+            let root = tmp.path();
+            let dir = Dir::new(&std::path::absolute(root)?)?;
+            std::fs::write(root.join("candidate"), b"protected")?;
+
+            for invalid in ["", ".", "../outside", "/absolute", "sub/../candidate"] {
+                assert_invalid_input(dir.commit(Path::new(invalid), Path::new("missing/target")));
+                assert_invalid_input(dir.commit(Path::new("missing/source"), Path::new(invalid)));
+            }
+            assert_eq!(std::fs::read(root.join("candidate"))?, b"protected");
+            assert_eq!(std::fs::read_dir(root)?.count(), 1);
+            Ok(())
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn escaping_ancestor_links_are_rejected_on_both_sides() -> io::Result<()> {
+            for absolute_link in [false, true] {
+                let sandbox = SymlinkSandbox::new(absolute_link)?;
+                std::fs::write(sandbox.root.join("candidate"), b"protected")?;
+                assert!(sandbox
+                    .dir
+                    .commit(Path::new("escape/sentinel"), Path::new("published"))
+                    .is_err());
+                assert_absent(&sandbox.root.join("published"));
+                assert!(sandbox
+                    .dir
+                    .commit(Path::new("candidate"), Path::new("escape/sentinel"))
+                    .is_err());
+                assert!(sandbox
+                    .dir
+                    .commit(Path::new("candidate"), Path::new("escape/new"))
+                    .is_err());
+                assert_absent(&sandbox.outside.join("new"));
+                assert_eq!(std::fs::read(sandbox.root.join("candidate"))?, b"protected");
+                sandbox.assert_unchanged()?;
+            }
+            Ok(())
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn in_root_ancestor_links_work() -> io::Result<()> {
+            use std::os::unix::fs::symlink;
+
+            let tmp = TempDir::new("dir")?;
+            let root = tmp.path();
+            std::fs::create_dir(root.join("inside"))?;
+            symlink("inside", root.join("link"))?;
+            std::fs::write(root.join("inside/candidate"), b"from link")?;
+            std::fs::write(root.join("other"), b"into link")?;
+            let dir = Dir::new(&std::path::absolute(root)?)?;
+
+            assert!(matches!(
+                dir.commit(Path::new("link/candidate"), Path::new("published"))?,
+                Outcome::Created
+            ));
+            assert!(matches!(
+                dir.commit(Path::new("other"), Path::new("link/published"))?,
+                Outcome::Created
+            ));
+            assert_eq!(std::fs::read(root.join("published"))?, b"from link");
+            assert_eq!(std::fs::read(root.join("inside/published"))?, b"into link");
+            assert_eq!(std::fs::read_link(root.join("link"))?, Path::new("inside"));
+            Ok(())
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn final_symlink_is_not_overwritten() -> io::Result<()> {
+            use std::os::unix::fs::symlink;
+
+            let tmp = TempDir::new("dir")?;
+            let parent = std::path::absolute(tmp.path())?;
+            let root = parent.join("root");
+            std::fs::create_dir(&root)?;
+            std::fs::write(parent.join("outside"), b"outside")?;
+            std::fs::write(root.join("candidate"), b"candidate")?;
+            let target = Path::new("../outside");
+            symlink(target, root.join("link"))?;
+            let dir = Dir::new(&root)?;
+
+            assert!(matches!(
+                dir.commit(Path::new("candidate"), Path::new("link"))?,
+                Outcome::Existing
+            ));
+            assert_eq!(std::fs::read(root.join("candidate"))?, b"candidate");
+            assert_eq!(std::fs::read_link(root.join("link"))?, target);
+            assert_eq!(std::fs::read(parent.join("outside"))?, b"outside");
+            Ok(())
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn opened_root_remains_the_commit_root_after_pathname_replacement() -> io::Result<()> {
+            let tmp = TempDir::new("dir")?;
+            let parent = std::path::absolute(tmp.path())?;
+            let root = parent.join("root");
+            let moved = parent.join("moved");
+            std::fs::create_dir(&root)?;
+            std::fs::create_dir(root.join("staging"))?;
+            std::fs::write(root.join("staging/candidate"), b"original")?;
+            let dir = Dir::new(&root)?;
+
+            std::fs::rename(&root, &moved)?;
+            std::fs::create_dir(&root)?;
+            std::fs::create_dir(root.join("staging"))?;
+            std::fs::write(root.join("staging/candidate"), b"replacement candidate")?;
+            std::fs::write(root.join("published"), b"replacement destination")?;
+
+            assert!(matches!(
+                dir.commit(Path::new("staging/candidate"), Path::new("published"))?,
+                Outcome::Created
+            ));
+            assert_eq!(std::fs::read(moved.join("published"))?, b"original");
+            assert_absent(&moved.join("staging/candidate"));
+            assert_eq!(
+                std::fs::read(root.join("staging/candidate"))?,
+                b"replacement candidate"
+            );
+            assert_eq!(
+                std::fs::read(root.join("published"))?,
+                b"replacement destination"
+            );
+            Ok(())
+        }
     }
 }

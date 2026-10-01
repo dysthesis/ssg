@@ -58,6 +58,7 @@ impl<F: Fs> Backend<F> {
         }
     }
 
+    // TODO: maybe merge this back into `put`?
     fn put_inner(&self, bytes: &[u8], hash: blake3::Hash) -> io::Result<()> {
         todo!()
     }
@@ -85,6 +86,7 @@ mod tests {
     };
 
     use super::*;
+    use crate::fs::Outcome;
     use proptest::prelude::*;
     use proptest_derive::Arbitrary;
     use tempdir::TempDir;
@@ -110,6 +112,25 @@ mod tests {
                 write_limit: None,
                 before_rename: None,
             }
+        }
+
+        fn pause_before_publication(&self, from: &Path, to: &Path) -> io::Result<()> {
+            if let Some(ready) = &self.before_rename {
+                // Let Dir enforce capability/path checks before signalling.
+                self.dir.metadata(from)?;
+                match self.dir.metadata(to) {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error),
+                }
+                let pending = ready.with_extension("pending");
+                std::fs::write(&pending, from.as_os_str().as_encoded_bytes())?;
+                std::fs::rename(pending, ready)?;
+                loop {
+                    thread::park();
+                }
+            }
+            Ok(())
         }
     }
 
@@ -160,22 +181,29 @@ mod tests {
         }
 
         fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-            if let Some(ready) = &self.before_rename {
-                // Let Dir enforce capability/path checks before signalling.
-                self.dir.metadata(from)?;
-                match self.dir.metadata(to) {
-                    Ok(_) => {}
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error),
-                }
-                let pending = ready.with_extension("pending");
-                std::fs::write(&pending, from.as_os_str().as_encoded_bytes())?;
-                std::fs::rename(pending, ready)?;
-                loop {
-                    thread::park();
-                }
-            }
+            self.pause_before_publication(from, to)?;
             self.dir.rename(from, to)
+        }
+
+        fn sync(&self, writer: &mut Self::Writer) -> io::Result<()> {
+            self.dir.sync(&mut writer.file)
+        }
+
+        fn commit(&self, staging: &Path, final_path: &Path) -> io::Result<Outcome> {
+            // Unsupported commits never reach a publication point to pause.
+            #[cfg(any(
+                target_os = "linux",
+                target_os = "android",
+                target_os = "redox"
+            ))]
+            {
+                if self.before_rename.is_some() {
+                    Dir::validate(staging)?;
+                    Dir::validate(final_path)?;
+                }
+                self.pause_before_publication(staging, final_path)?;
+            }
+            self.dir.commit(staging, final_path)
         }
 
         fn remove_file(&self, path: &Path) -> io::Result<()> {
@@ -234,7 +262,7 @@ mod tests {
             if Instant::now() >= deadline {
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    "child did not reach rename",
+                    "child did not reach publication",
                 ));
             }
             thread::sleep(Duration::from_millis(10));
@@ -253,14 +281,15 @@ mod tests {
         if std::env::var("STORE_BACKEND_CHECK").as_deref() == Ok("1") {
             let mut writer = fs.create_new(Path::new("candidate")).unwrap();
             writer.write_all(&bytes).unwrap();
+            fs.sync(&mut writer).unwrap();
             drop(writer);
-            fs.rename(Path::new("candidate"), Path::new("published"))
+            fs.commit(Path::new("candidate"), Path::new("published"))
                 .unwrap();
         } else {
             let store = Store::init_with_fs(fs).unwrap();
             store.put(&bytes).unwrap();
         }
-        panic!("paused rename unexpectedly returned");
+        panic!("paused publication unexpectedly returned");
     }
 
     #[test]
@@ -289,8 +318,43 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(not(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "redox"
+    )))]
     #[test]
-    fn backend_pause_precedes_rename_and_kill_leaves_candidate() -> io::Result<()> {
+    fn unsupported_commit_skips_pause_and_preserves_entries() -> io::Result<()> {
+        let tmp = TempDir::new("store")?;
+        let signal = TempDir::new("store-signal")?;
+        let ready = signal.path().join("absent/ready");
+        let mut fs = TestFs::new(Dir::new(&std::path::absolute(tmp.path())?)?);
+        fs.before_rename = Some(ready.clone());
+        std::fs::write(tmp.path().join("candidate"), b"candidate")?;
+        std::fs::write(tmp.path().join("published"), b"published")?;
+
+        let error = match fs.commit(Path::new("candidate"), Path::new("published")) {
+            Err(error) => error,
+            Ok(_) => panic!("unsupported commit unexpectedly succeeded"),
+        };
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert!(matches!(
+            fs.commit(Path::new("candidate"), Path::new("../outside")),
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput
+        ));
+        assert_eq!(std::fs::read(tmp.path().join("candidate"))?, b"candidate");
+        assert_eq!(std::fs::read(tmp.path().join("published"))?, b"published");
+        assert!(!ready.parent().unwrap().exists());
+        Ok(())
+    }
+
+    #[cfg(any(
+        target_os = "linux",
+        target_os = "android",
+        target_os = "redox"
+    ))]
+    #[test]
+    fn backend_pause_precedes_commit_and_kill_leaves_candidate() -> io::Result<()> {
         let tmp = TempDir::new("store")?;
         let signal = TempDir::new("store-signal")?;
         let ready = signal.path().join("ready");
@@ -305,7 +369,10 @@ mod tests {
         assert!(!child.0.wait()?.success());
         assert_eq!(std::fs::read(tmp.path().join(&candidate))?, b"complete");
         let fs = TestFs::new(Dir::new(tmp.path())?);
-        fs.rename(&candidate, Path::new("published"))?;
+        assert!(matches!(
+            fs.commit(&candidate, Path::new("published"))?,
+            Outcome::Created
+        ));
         assert_eq!(std::fs::read(tmp.path().join("published"))?, b"complete");
         Ok(())
     }
