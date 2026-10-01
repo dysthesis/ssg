@@ -86,28 +86,6 @@ impl Dir {
             ))
         }
     }
-
-    // Return the parent, the raw source leaf, and the destination leaf with
-    // trailing slashes removed, matching cap-std's rename path handling.
-    #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
-    fn split_commit_path(path: &Path) -> (&Path, &std::ffi::OsStr, &std::ffi::OsStr) {
-        use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
-
-        let bytes = path.as_os_str().as_bytes();
-        let end = bytes
-            .iter()
-            .rposition(|&byte| byte != b'/')
-            .map_or(0, |index| index + 1);
-        let start = bytes[..end]
-            .iter()
-            .rposition(|&byte| byte == b'/')
-            .map_or(0, |index| index + 1);
-        (
-            Path::new(OsStr::from_bytes(&bytes[..start])),
-            OsStr::from_bytes(&bytes[start..]),
-            OsStr::from_bytes(&bytes[start..end]),
-        )
-    }
 }
 
 impl Fs for Dir {
@@ -161,10 +139,31 @@ impl Fs for Dir {
 
         #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
         {
-            use rustix::fs::{renameat_with, RenameFlags};
+            use rustix::fs::{RenameFlags, renameat_with};
 
-            let (from_parent, from_leaf, _) = Self::split_commit_path(staging);
-            let (to_parent, _, to_leaf) = Self::split_commit_path(final_path);
+            // Return the parent, the raw source leaf, and the destination leaf with
+            // trailing slashes removed, matching cap-std's rename path handling.
+            fn split_commit_path(path: &Path) -> (&Path, &std::ffi::OsStr, &std::ffi::OsStr) {
+                use std::{ffi::OsStr, os::unix::ffi::OsStrExt};
+
+                let bytes = path.as_os_str().as_bytes();
+                let end = bytes
+                    .iter()
+                    .rposition(|&byte| byte != b'/')
+                    .map_or(0, |index| index + 1);
+                let start = bytes[..end]
+                    .iter()
+                    .rposition(|&byte| byte == b'/')
+                    .map_or(0, |index| index + 1);
+                (
+                    Path::new(OsStr::from_bytes(&bytes[..start])),
+                    OsStr::from_bytes(&bytes[start..]),
+                    OsStr::from_bytes(&bytes[start..end]),
+                )
+            }
+
+            let (from_parent, from_leaf, _) = split_commit_path(staging);
+            let (to_parent, _, to_leaf) = split_commit_path(final_path);
             let from_dir = if from_parent
                 .components()
                 .all(|component| component == Component::CurDir)
@@ -190,13 +189,14 @@ impl Fs for Dir {
                 to_dir.as_ref().unwrap_or(&self.cap_root)
             };
 
-            match renameat_with(from_dir, from_leaf, to_dir, to_leaf, RenameFlags::NOREPLACE) {
+            return match renameat_with(from_dir, from_leaf, to_dir, to_leaf, RenameFlags::NOREPLACE)
+            {
                 Ok(()) => Ok(Outcome::Created),
                 Err(rustix::io::Errno::EXIST) => Ok(Outcome::Existing),
                 Err(error) => Err(error.into()),
-            }
+            };
         }
-        #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "redox")))]
+        #[allow(unreachable_code)] // Supported targets return above.
         {
             Err(io::Error::new(
                 io::ErrorKind::Unsupported,
