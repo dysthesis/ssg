@@ -1,6 +1,10 @@
-use std::{io, path::PathBuf};
+use std::{
+    io::{self, Read, Write},
+    path::PathBuf,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use crate::fs::{Dir, Fs};
+use crate::fs::{Dir, Fs, Outcome};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -8,6 +12,12 @@ pub enum Error {
     PathNotFound { path: PathBuf },
     #[error("Failed to put object {hash}")]
     PutError {
+        hash: blake3::Hash,
+        #[source]
+        error: io::Error,
+    },
+    #[error("Failed to get object {hash}")]
+    GetError {
         hash: blake3::Hash,
         #[source]
         error: io::Error,
@@ -43,11 +53,35 @@ struct Backend<F> {
 
 impl<F: Fs> Backend<F> {
     fn init_with_fs(dir: F) -> Result<Self> {
-        todo!()
+        Ok(Self { dir })
     }
 
     fn get(&self, key: blake3::Hash) -> Result<Vec<u8>> {
-        todo!()
+        let reader = self
+            .dir
+            .open_read(&self.object_path(key))
+            .map_err(|error| {
+                if error.kind() == io::ErrorKind::NotFound {
+                    Error::PathNotFound {
+                        path: self.object_path(key),
+                    }
+                } else {
+                    Error::GetError { hash: key, error }
+                }
+            })?;
+        Self::read_object(reader, key).map_err(|error| Error::GetError { hash: key, error })
+    }
+
+    fn read_object(mut reader: F::Reader, hash: blake3::Hash) -> io::Result<Vec<u8>> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        if blake3::hash(&bytes) != hash {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "object hash mismatch",
+            ));
+        }
+        Ok(bytes)
     }
 
     fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
@@ -60,7 +94,41 @@ impl<F: Fs> Backend<F> {
 
     // TODO: maybe merge this back into `put`?
     fn put_inner(&self, bytes: &[u8], hash: blake3::Hash) -> io::Result<()> {
-        todo!()
+        static NEXT_CANDIDATE: AtomicU64 = AtomicU64::new(0);
+
+        let final_path = self.object_path(hash);
+        let shard = final_path.parent().unwrap();
+        self.dir.create_dir_all(shard)?;
+        let (candidate, mut writer) = loop {
+            let id = NEXT_CANDIDATE.fetch_add(1, Ordering::Relaxed);
+            let candidate = shard.join(format!(".candidate-{}-{id}", std::process::id()));
+            match self.dir.create_new(&candidate) {
+                Ok(writer) => break (candidate, writer),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(error),
+            }
+        };
+
+        let publication = (|| {
+            writer.write_all(bytes)?;
+            writer.flush()?;
+            self.dir.sync(&mut writer)?;
+            drop(writer);
+            self.dir.commit(&candidate, &final_path)
+        })();
+        if matches!(publication, Ok(Outcome::Created)) {
+            return Ok(());
+        }
+        // best-effort cleanup may leave an orphan; never scavenge
+        let _ = self.dir.remove_file(&candidate);
+        publication?;
+        if Self::read_object(self.dir.open_read(&final_path)?, hash)? != bytes {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "existing object differs from input",
+            ));
+        }
+        Ok(())
     }
 
     #[inline]
@@ -70,6 +138,10 @@ impl<F: Fs> Backend<F> {
         PathBuf::from(&hex[..2]).join(&hex[2..])
     }
 }
+
+#[cfg(test)]
+#[path = "store_checks.rs"]
+mod store_checks;
 
 #[cfg(test)]
 mod tests {
@@ -191,11 +263,7 @@ mod tests {
 
         fn commit(&self, staging: &Path, final_path: &Path) -> io::Result<Outcome> {
             // Unsupported commits never reach a publication point to pause.
-            #[cfg(any(
-                target_os = "linux",
-                target_os = "android",
-                target_os = "redox"
-            ))]
+            #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
             {
                 if self.before_rename.is_some() {
                     Dir::validate(staging)?;
@@ -318,11 +386,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "redox"
-    )))]
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "redox")))]
     #[test]
     fn unsupported_commit_skips_pause_and_preserves_entries() -> io::Result<()> {
         let tmp = TempDir::new("store")?;
@@ -348,11 +412,7 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "android",
-        target_os = "redox"
-    ))]
+    #[cfg(any(target_os = "linux", target_os = "android", target_os = "redox"))]
     #[test]
     fn backend_pause_precedes_commit_and_kill_leaves_candidate() -> io::Result<()> {
         let tmp = TempDir::new("store")?;
