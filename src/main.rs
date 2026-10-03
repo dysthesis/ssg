@@ -1,7 +1,10 @@
 use std::env;
 
 use color_eyre::eyre;
-use ssg::{fs::Dir, store::Store};
+use ssg::{
+    fs::Dir,
+    store::{Id, Store},
+};
 
 use crate::cli::Cli;
 
@@ -21,7 +24,7 @@ fn main() -> eyre::Result<()> {
             println!("Stored as {key}")
         }
         Cli::Get(key) => {
-            let key = blake3::Hash::from_hex(key)?;
+            let key = key.parse::<Id>()?;
             let curr_dir = env::current_dir()?;
             let store = Store::init(Dir::new(&curr_dir)?)?;
             let bytes = store.get(key)?;

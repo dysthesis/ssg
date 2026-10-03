@@ -1,24 +1,101 @@
 use std::{
+    fmt,
     io::{self, Read, Write},
     path::PathBuf,
+    str::FromStr,
     sync::atomic::{AtomicU64, Ordering},
 };
 
 use crate::fs::{Dir, Fs, Outcome};
 
+/// A 32-byte content digest used to address an object in a [`Store`].
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
+pub struct Id([u8; 32]);
+
+impl Id {
+    /// Construct a digest value without checking membership or content
+    /// integrity.
+    pub const fn from_bytes(bytes: [u8; 32]) -> Self {
+        Self(bytes)
+    }
+
+    /// Borrow the digest bytes in their original order.
+    pub const fn as_bytes(&self) -> &[u8; 32] {
+        &self.0
+    }
+}
+
+impl fmt::Display for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hex = encode_hex(self.as_bytes());
+        f.write_str(std::str::from_utf8(&hex).expect("hex encoding is ASCII"))
+    }
+}
+
+impl fmt::Debug for Id {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Id").field(&format_args!("{self}")).finish()
+    }
+}
+
+impl FromStr for Id {
+    type Err = Error;
+
+    fn from_str(input: &str) -> std::result::Result<Self, Self::Err> {
+        let input = input.as_bytes();
+        if input.len() != 64 {
+            return Err(Error::InvalidIdLength {
+                actual: input.len(),
+            });
+        }
+
+        let mut bytes = [0; 32];
+        for (i, pair) in input.as_chunks::<2>().0.iter().enumerate() {
+            let high = decode_hex_digit(pair[0]).ok_or(Error::InvalidIdHex { index: i * 2 })?;
+            let low = decode_hex_digit(pair[1]).ok_or(Error::InvalidIdHex { index: i * 2 + 1 })?;
+            bytes[i] = high << 4 | low;
+        }
+        Ok(Self::from_bytes(bytes))
+    }
+}
+
+fn encode_hex(bytes: &[u8; 32]) -> [u8; 64] {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut hex = [0; 64];
+    for (i, &byte) in bytes.iter().enumerate() {
+        hex[i * 2] = DIGITS[(byte >> 4) as usize];
+        hex[i * 2 + 1] = DIGITS[(byte & 0x0f) as usize];
+    }
+    hex
+}
+
+fn decode_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Errors from parsing IDs or accessing stored objects.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("Expected 64 hexadecimal bytes for an object ID, found {actual}.")]
+    InvalidIdLength { actual: usize },
+    #[error("Invalid hexadecimal digit in an object ID at byte {index}.")]
+    InvalidIdHex { index: usize },
     #[error("The path {path} cannot be found, or is inaccessible.")]
     PathNotFound { path: PathBuf },
     #[error("Failed to put object {hash}")]
     PutError {
-        hash: blake3::Hash,
+        hash: Id,
         #[source]
         error: io::Error,
     },
     #[error("Failed to get object {hash}")]
     GetError {
-        hash: blake3::Hash,
+        hash: Id,
         #[source]
         error: io::Error,
     },
@@ -40,12 +117,18 @@ impl Store {
     pub fn init(dir: Dir) -> Result<Self> {
         Backend::init_with_fs(dir).map(|inner| Self { inner })
     }
-    /// Get the bytes stored that is associated with the given key
-    pub fn get(&self, key: blake3::Hash) -> Result<Vec<u8>> {
+    /// Read the complete object and verify its BLAKE3 digest before returning bytes.
+    ///
+    /// A valid [`Id`] may be absent; the digest value alone does not establish
+    /// store membership or content integrity.
+    pub fn get(&self, key: Id) -> Result<Vec<u8>> {
         self.inner.get(key)
     }
-    /// Put some arbitrary bytes into the store, returning its key.
-    pub fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
+    /// Store the complete input bytes, returning their BLAKE3 digest as an [`Id`].
+    ///
+    /// If the object already exists, verify its digest and compare all resident
+    /// bytes with the input before accepting the duplicate.
+    pub fn put(&self, bytes: &[u8]) -> Result<Id> {
         self.inner.put(bytes)
     }
 }
@@ -59,7 +142,7 @@ impl<F: Fs> Backend<F> {
         Ok(Self { dir })
     }
 
-    fn get(&self, key: blake3::Hash) -> Result<Vec<u8>> {
+    fn get(&self, key: Id) -> Result<Vec<u8>> {
         let reader = self
             .dir
             .open_read(&self.object_path(key))
@@ -75,10 +158,10 @@ impl<F: Fs> Backend<F> {
         Self::read_object(reader, key).map_err(|error| Error::GetError { hash: key, error })
     }
 
-    fn read_object(mut reader: F::Reader, hash: blake3::Hash) -> io::Result<Vec<u8>> {
+    fn read_object(mut reader: F::Reader, hash: Id) -> io::Result<Vec<u8>> {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes)?;
-        if blake3::hash(&bytes) != hash {
+        if blake3::hash(&bytes).as_bytes() != hash.as_bytes() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "object hash mismatch",
@@ -87,8 +170,8 @@ impl<F: Fs> Backend<F> {
         Ok(bytes)
     }
 
-    fn put(&self, bytes: &[u8]) -> Result<blake3::Hash> {
-        let hash = blake3::hash(bytes);
+    fn put(&self, bytes: &[u8]) -> Result<Id> {
+        let hash = Id::from_bytes(*blake3::hash(bytes).as_bytes());
         match self.put_inner(bytes, hash) {
             Ok(_) => Ok(hash),
             Err(error) => Err(Error::PutError { hash, error }),
@@ -97,7 +180,7 @@ impl<F: Fs> Backend<F> {
 
     // TODO: maybe merge this back into `put`?
     #[inline]
-    fn put_inner(&self, bytes: &[u8], hash: blake3::Hash) -> io::Result<()> {
+    fn put_inner(&self, bytes: &[u8], hash: Id) -> io::Result<()> {
         // Find the next free tempfile number
         static NEXT_CANDIDATE: AtomicU64 = AtomicU64::new(0);
 
@@ -140,10 +223,13 @@ impl<F: Fs> Backend<F> {
     }
 
     #[inline]
-    fn object_path(&self, hash: blake3::Hash) -> PathBuf {
-        let hex = hash.to_hex();
-
-        PathBuf::from(&hex[..2]).join(&hex[2..])
+    fn object_path(&self, hash: Id) -> PathBuf {
+        let hex = encode_hex(hash.as_bytes());
+        let hex = std::str::from_utf8(&hex).expect("hex encoding is ASCII");
+        let mut path = PathBuf::with_capacity(hex.len() + 1);
+        path.push(&hex[..2]);
+        path.push(&hex[2..]);
+        path
     }
 }
 

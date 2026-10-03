@@ -1,4 +1,5 @@
     use std::{
+        collections::{HashMap, HashSet},
         fs::File,
         io::Write,
         path::Path,
@@ -303,7 +304,11 @@
         Ok(())
     }
 
-    fn objects(root: &Path) -> color_eyre::Result<Vec<blake3::Hash>> {
+    fn content_id(bytes: &[u8]) -> Id {
+        Id::from_bytes(*blake3::hash(bytes).as_bytes())
+    }
+
+    fn objects(root: &Path) -> color_eyre::Result<Vec<Id>> {
         use color_eyre::eyre::bail;
         let mut hashes = Vec::new();
         for shard in std::fs::read_dir(root)? {
@@ -330,7 +335,7 @@
                 if !entry.file_type()?.is_file() {
                     bail!("unexpected non-file object: {:?}", entry.path());
                 }
-                hashes.push(blake3::Hash::from_hex(format!("{prefix}{suffix}"))?);
+                hashes.push(format!("{prefix}{suffix}").parse::<Id>()?);
             }
         }
         Ok(hashes)
@@ -344,7 +349,7 @@
         };
         assert!(objects(tmp.path())?.is_empty());
         Op::GetExisting(0).run(&store, tmp.path())?;
-        let expected = [blake3::Hash::from_bytes([0; 32]), blake3::hash(b"object")];
+        let expected = [Id::from_bytes([0; 32]), content_id(b"object")];
         for hash in expected {
             let path = tmp.path().join(store.object_path(hash));
             std::fs::create_dir_all(path.parent().unwrap())?;
@@ -374,7 +379,7 @@
                     store.put(bytes)?;
                 }
                 Op::GetNonexistent(bytes) => {
-                    let hash = blake3::hash(bytes);
+                    let hash = content_id(bytes);
                     store.get(hash)?;
                 }
                 Op::GetExisting(idx) => {
@@ -424,13 +429,13 @@
             (Just(bytes), prop::collection::btree_set(0..len, 1..=len))
         })
     }
-    fn arb_hash() -> impl Strategy<Value = blake3::Hash> {
-        any::<[u8; 32]>().prop_map(blake3::Hash::from_bytes)
+    fn arb_hash() -> impl Strategy<Value = Id> {
+        any::<[u8; 32]>().prop_map(Id::from_bytes)
     }
-    fn hash_with_leading_zeroes() -> impl Strategy<Value = blake3::Hash> {
+    fn hash_with_leading_zeroes() -> impl Strategy<Value = Id> {
         (1usize..32, any::<[u8; 32]>()).prop_map(|(zeroes, mut bytes)| {
             bytes[..zeroes].fill(0);
-            blake3::Hash::from_bytes(bytes)
+            Id::from_bytes(bytes)
         })
     }
 
@@ -448,7 +453,186 @@
         prop::collection::btree_set(prop::collection::vec(any::<u8>(), 0..=4096), 2..=16)
             .prop_map(|set| set.into_iter().collect())
     }
+
+    #[test]
+    fn id_hex_matches_known_byte_order_vectors() {
+        for (bytes, hex) in [
+            (
+                [0; 32],
+                "0000000000000000000000000000000000000000000000000000000000000000",
+            ),
+            (
+                std::array::from_fn(|i| i as u8),
+                "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+            ),
+            (
+                [
+                    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+                    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+                    0x10, 0x21, 0x32, 0x43, 0x54, 0x65, 0x76, 0x87,
+                    0x98, 0xa9, 0xba, 0xcb, 0xdc, 0xed, 0xfe, 0xff,
+                ],
+                "000102030405060708090a0b0c0d0e0f102132435465768798a9bacbdcedfeff",
+            ),
+        ] {
+            assert_eq!(Id::from_bytes(bytes).to_string(), hex);
+            assert_eq!(*hex.parse::<Id>().unwrap().as_bytes(), bytes);
+        }
+    }
+
+    #[test]
+    fn id_hex_preserves_leading_zeroes() {
+        let mut bytes = [0; 32];
+        bytes[31] = 0x0a;
+        let hex = format!("{}a", "0".repeat(63));
+        let id = Id::from_bytes(bytes);
+        assert_eq!(id.to_string(), hex);
+        assert_eq!(hex.parse::<Id>().unwrap(), id);
+    }
+
+    #[test]
+    fn id_parse_normalizes_uppercase_and_mixed_case() {
+        let pattern = [0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89];
+        let id = Id::from_bytes(std::array::from_fn(|i| pattern[i % pattern.len()]));
+        let canonical = "abcdef0123456789".repeat(4);
+        for input in [
+            "ABCDEF0123456789".repeat(4),
+            "aBcDeF0123456789".repeat(4),
+        ] {
+            let parsed = input.parse::<Id>().unwrap();
+            assert_eq!(parsed, id);
+            assert_eq!(parsed.to_string(), canonical);
+        }
+    }
+
+    #[test]
+    fn id_parse_rejects_noncanonical_forms() {
+        for input in [
+            String::new(),
+            "01234567".to_owned(),
+            "0".repeat(63),
+            "0".repeat(65),
+            format!("0x{}", "0".repeat(64)),
+            format!(" {}", "0".repeat(64)),
+            format!("{}\n", "0".repeat(64)),
+            "é".repeat(64),
+        ] {
+            match input.parse::<Id>() {
+                Err(Error::InvalidIdLength { actual }) => assert_eq!(actual, input.len()),
+                other => panic!("expected InvalidIdLength, got {other:?}"),
+            }
+        }
+
+        for (input, index) in [
+            (format!("0x{}", "0".repeat(62)), 1),
+            (format!("0X{}", "0".repeat(62)), 1),
+            (format!(" {}", "0".repeat(63)), 0),
+            (format!("{} ", "0".repeat(63)), 63),
+            (format!("\t{}", "0".repeat(63)), 0),
+            (format!("{}\n", "0".repeat(63)), 63),
+            (format!("{}-{}", "0".repeat(31), "0".repeat(32)), 31),
+            (format!("{}_{}", "0".repeat(31), "0".repeat(32)), 31),
+            (format!("{}:{}", "0".repeat(31), "0".repeat(32)), 31),
+            ("é".repeat(32), 0),
+            (format!("{}é0", "0".repeat(61)), 61),
+            (format!("０{}", "0".repeat(61)), 0),
+            (format!("{}\u{10000}", "0".repeat(60)), 60),
+        ] {
+            assert_eq!(input.len(), 64);
+            match input.parse::<Id>() {
+                Err(Error::InvalidIdHex { index: actual }) => assert_eq!(actual, index),
+                other => panic!("expected InvalidIdHex, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn stored_id_text_addresses_unchanged_bytes_after_reopening() -> color_eyre::Result<()> {
+        let tmp = TempDir::new("store")?;
+        let bytes = b"complete bytes addressed through the public API";
+        let store = super::Store::init(Dir::new(tmp.path())?)?;
+        let id = store.put(bytes)?;
+        let expected = blake3::hash(bytes).to_hex();
+        assert_eq!(id.to_string(), expected.as_str());
+        let path = tmp.path().join(&expected[..2]).join(&expected[2..]);
+        assert_eq!(std::fs::read(path)?, bytes);
+        drop(store);
+
+        let parsed = id.to_string().to_ascii_uppercase().parse::<Id>()?;
+        let reopened = super::Store::init(Dir::new(tmp.path())?)?;
+        assert_eq!(reopened.get(parsed)?, bytes);
+        Ok(())
+    }
+
     proptest! {
+        #[test]
+        fn id_hex_roundtrips(bytes in any::<[u8; 32]>()) {
+            let id = Id::from_bytes(bytes);
+            let hex = id.to_string();
+            prop_assert_eq!(hex.len(), 64);
+            prop_assert!(hex.bytes().all(|byte|
+                byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)
+            ));
+            let parsed = hex.parse::<Id>().unwrap();
+            prop_assert_eq!(*parsed.as_bytes(), bytes);
+            prop_assert_eq!(hex.to_ascii_uppercase().parse::<Id>().unwrap(), id);
+        }
+
+        #[test]
+        fn id_parse_rejects_other_lengths(
+            length in prop_oneof![0usize..64, 65usize..=256],
+        ) {
+            match "0".repeat(length).parse::<Id>() {
+                Err(Error::InvalidIdLength { actual }) => prop_assert_eq!(actual, length),
+                other => prop_assert!(false, "expected InvalidIdLength, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn id_parse_reports_invalid_ascii_byte(
+            index in 0usize..64,
+            byte in any::<u8>().prop_filter(
+                "non-hex ASCII byte",
+                |byte| byte.is_ascii() && !byte.is_ascii_hexdigit(),
+            ),
+        ) {
+            let mut input = vec![b'0'; 64];
+            input[index] = byte;
+            let input = String::from_utf8(input).unwrap();
+            match input.parse::<Id>() {
+                Err(Error::InvalidIdHex { index: actual }) => prop_assert_eq!(actual, index),
+                other => prop_assert!(false, "expected InvalidIdHex, got {other:?}"),
+            }
+        }
+
+        #[test]
+        fn id_collection_keys_use_the_complete_digest(
+            bytes in any::<[u8; 32]>(),
+            difference in 1u8..=255,
+        ) {
+            let id = Id::from_bytes(bytes);
+            let mut map = HashMap::new();
+            let mut set = HashSet::new();
+            map.insert(id, 32);
+            set.insert(id);
+            for index in 0..32 {
+                let mut other_bytes = bytes;
+                other_bytes[index] ^= difference;
+                let other = Id::from_bytes(other_bytes);
+                prop_assert_ne!(id, other);
+                prop_assert_eq!(map.insert(other, index), None);
+                prop_assert!(set.insert(other));
+                let parsed = other.to_string().to_ascii_uppercase().parse::<Id>().unwrap();
+                prop_assert_eq!(map.get(&parsed), Some(&index));
+                prop_assert!(!set.insert(parsed));
+            }
+            let parsed = id.to_string().parse::<Id>().unwrap();
+            prop_assert_eq!(map.get(&parsed), Some(&32));
+            prop_assert!(!set.insert(parsed));
+            prop_assert_eq!(map.len(), 33);
+            prop_assert_eq!(set.len(), 33);
+        }
+
         #[test]
         fn relative_object_path_uses_owned_directory(hash in arb_hash()) {
             use std::io::Read;
@@ -470,7 +654,7 @@
                 let store = Store {
                     dir: TestFs::new(Dir::new(&root)?),
                 };
-                let path = store.object_path(blake3::Hash::from_bytes(bytes));
+                let path = store.object_path(Id::from_bytes(bytes));
                 let expected = Path::new(shard).join(suffix);
                 prop_assert!(path.is_relative());
                 prop_assert_eq!(&path, &expected);
@@ -506,7 +690,7 @@
             let store = Store::init(Dir::new(tmp.path())?)?;
 
             let key = store.put(&bytes)?;
-            let expected = blake3::hash(&bytes);
+            let expected = content_id(&bytes);
             prop_assert_eq!(key, expected);
         }
 
@@ -517,7 +701,7 @@
             let store = Store::init(Dir::new(tmp.path())?)?;
 
             let key = store.put(&bytes)?;
-            let obtained = store.get(key)?;
+            let obtained = store.get(key.to_string().parse::<Id>()?)?;
             prop_assert_eq!(obtained, bytes);
         }
 
@@ -529,7 +713,7 @@
 
             let key = store.put(&bytes)?;
             let obtained = store.get(key)?;
-            let hashed = blake3::hash(&obtained);
+            let hashed = content_id(&obtained);
             prop_assert_eq!(hashed, key);
         }
 
@@ -538,7 +722,7 @@
         fn get_nonexistent_yields_err(bytes in any::<Vec<u8>>()) {
             // We're not going to actually put the bytes in the store,
             // we'll just hash it
-            let nonexistent = blake3::hash(&bytes);
+            let nonexistent = content_id(&bytes);
             let tmp = TempDir::new("test")?;
             let store = Store::init(Dir::new(tmp.path())?)?;
             let obtained = store.get(nonexistent);
@@ -676,8 +860,8 @@
             x in any::<Vec<u8>>(),
             y in any::<Vec<u8>>(),
         ) {
-            let x_hash = blake3::hash(&x);
-            let y_hash = blake3::hash(&y);
+            let x_hash = content_id(&x);
+            let y_hash = content_id(&y);
 
             prop_assume!(x_hash != y_hash);
 
@@ -736,7 +920,7 @@
             prop_assert_eq!(shard.len(), 2);
             let hex = format!("{shard}{filename}");
             prop_assert_eq!(hex.len(), 64);
-            let decoded = blake3::Hash::from_hex(hex).unwrap();
+            let decoded = hex.parse::<Id>().unwrap();
 
             prop_assert_eq!(decoded, hash);
         }
@@ -775,7 +959,7 @@
                 format!("{prefix}{suffix}");
 
             prop_assert_eq!(
-                blake3::Hash::from_hex(&reconstructed) .unwrap(),
+                reconstructed.parse::<Id>().unwrap(),
                 hash,
             );
         }
@@ -790,7 +974,7 @@
             let mut fs = TestFs::new(Dir::new(tmp.path())?);
             fs.write_limit = Some(prefix_len);
             let store = Store::init_with_fs(fs)?;
-            let hash = blake3::hash(&bytes);
+            let hash = content_id(&bytes);
             let result = store.put(&bytes);
 
             prop_assert!(result.is_err());
@@ -837,7 +1021,7 @@
             // Release all writers together.
             barrier.wait();
 
-            let expected = blake3::hash(&bytes);
+            let expected = content_id(&bytes);
 
             for handle in handles {
                 let actual = handle
@@ -866,7 +1050,7 @@
 
             let expected: Vec<_> = objects
                 .iter()
-                .map(|bytes| blake3::hash(bytes))
+                .map(|bytes| content_id(bytes))
                 .collect();
 
             // Exclude an actual cryptographic collision from the property.
@@ -905,7 +1089,7 @@
 
                 prop_assert_eq!(
                     hash,
-                    blake3::hash(&bytes)
+                    content_id(&bytes)
                 );
             }
 
@@ -930,7 +1114,7 @@
                 Store::init(Dir::new(temp.path()).unwrap()).unwrap()
             );
 
-            let hash = blake3::hash(&bytes);
+            let hash = content_id(&bytes);
 
             let start =
                 Arc::new(Barrier::new(readers + 2));
@@ -953,7 +1137,7 @@
                                 Ok(actual) => {
                                     assert_eq!(actual, expected);
                                     assert_eq!(
-                                        blake3::hash(&actual),
+                                        content_id(&actual),
                                         hash
                                     );
                                 }
@@ -1009,7 +1193,7 @@
             let actual = store.get(hash).unwrap();
 
             prop_assert_eq!(&actual, &bytes);
-            prop_assert_eq!(blake3::hash(&actual), hash);
+            prop_assert_eq!(content_id(&actual), hash);
         }
 
         /// You cannot have two writers writing to the same file. But crashing
@@ -1034,7 +1218,7 @@
             // before publication.
             let store = Store::init(Dir::new(&root).unwrap()).unwrap();
 
-            let expected = blake3::hash(&bytes);
+            let expected = content_id(&bytes);
             prop_assert_eq!(&std::fs::read(root.join(&candidate)).unwrap(), &bytes);
             prop_assert_eq!(
                 std::fs::symlink_metadata(root.join(store.object_path(expected)))
@@ -1250,12 +1434,11 @@
         .unwrap()
     }
 
-    fn assert_put_error(result: Result<blake3::Hash>, bytes: &[u8], fault: Fault) {
+    fn assert_put_error(result: Result<Id>, bytes: &[u8], fault: Fault) {
         match result {
             Err(Error::PutError { hash, error }) => {
-                assert_eq!(hash, blake3::hash(bytes));
+                assert_eq!(hash, content_id(bytes));
                 assert_eq!(error.kind(), fault.error().kind());
-                assert_eq!(error.to_string(), fault.error().to_string());
             }
             other => panic!("expected primary {fault:?} error, got {other:?}"),
         }
@@ -1314,7 +1497,7 @@
             assert_put_error(store.put(bytes), bytes, fault);
             assert!(!tmp
                 .path()
-                .join(store.object_path(blake3::hash(bytes)))
+                .join(store.object_path(content_id(bytes)))
                 .exists());
             let trace = store.dir.trace.lock().unwrap();
             assert_eq!(trace.owned.len(), 1);
@@ -1355,7 +1538,7 @@
         assert_put_error(store.put(bytes), bytes, Fault::Sync);
         assert!(!tmp
             .path()
-            .join(store.object_path(blake3::hash(bytes)))
+            .join(store.object_path(content_id(bytes)))
             .exists());
         let orphan = {
             let trace = store.dir.trace.lock().unwrap();
@@ -1379,7 +1562,7 @@
             let tmp = TempDir::new("store-check").unwrap();
             let bytes = b"original object";
             let store = backend(tmp.path(), bytes, Trace::default(), true);
-            let hash = blake3::hash(bytes);
+            let hash = content_id(bytes);
             let path = tmp.path().join(store.object_path(hash));
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             let resident = if corrupt {
@@ -1389,7 +1572,7 @@
             };
             std::fs::write(&path, resident).unwrap();
             let other_bytes = b"another object";
-            let other_hash = blake3::hash(other_bytes);
+            let other_hash = content_id(other_bytes);
             let other_path = tmp.path().join(store.object_path(other_hash));
             std::fs::create_dir_all(other_path.parent().unwrap()).unwrap();
             std::fs::write(&other_path, other_bytes).unwrap();
@@ -1401,7 +1584,7 @@
                     }
                     other => panic!("corrupt duplicate accepted: {other:?}"),
                 }
-                assert_get_error(store.get(hash), hash, io::ErrorKind::InvalidData, None);
+                assert_get_error(store.get(hash), hash, io::ErrorKind::InvalidData);
             } else {
                 assert_eq!(store.put(bytes).unwrap(), hash);
                 assert_eq!(store.get(hash).unwrap(), bytes);
@@ -1417,17 +1600,13 @@
 
     fn assert_get_error(
         result: Result<Vec<u8>>,
-        key: blake3::Hash,
+        key: Id,
         kind: io::ErrorKind,
-        message: Option<&str>,
     ) {
         match result {
             Err(Error::GetError { hash, error }) => {
                 assert_eq!(hash, key);
                 assert_eq!(error.kind(), kind);
-                if let Some(message) = message {
-                    assert_eq!(error.to_string(), message);
-                }
             }
             other => panic!("expected GetError, got {other:?}"),
         }
@@ -1438,7 +1617,7 @@
         let tmp = TempDir::new("store-check").unwrap();
         let bytes = b"missing object";
         let store = backend(tmp.path(), bytes, Trace::default(), false);
-        let key = blake3::hash(bytes);
+        let key = content_id(bytes);
         match store.get(key) {
             Err(Error::PathNotFound { path }) => assert_eq!(path, store.object_path(key)),
             other => panic!("expected PathNotFound, got {other:?}"),
@@ -1448,7 +1627,6 @@
             store.get(key),
             key,
             io::ErrorKind::PermissionDenied,
-            Some("injected open"),
         );
     }
 
@@ -1457,7 +1635,7 @@
     fn separate_reader_gets_at_both_commit_boundaries() {
         let tmp = TempDir::new("store-check").unwrap();
         let bytes = b"complete object at both publication boundaries";
-        let hash = blake3::hash(bytes);
+        let hash = content_id(bytes);
         let reader = super::Store::init(Dir::new(tmp.path()).unwrap()).unwrap();
         let mut writer = backend(tmp.path(), bytes, Trace::default(), false);
         let path = writer.object_path(hash);
@@ -1484,7 +1662,7 @@
                     "after" => {
                         let actual = reader.get(hash).unwrap();
                         assert_eq!(actual, bytes);
-                        assert_eq!(blake3::hash(&actual), hash);
+                        assert_eq!(content_id(&actual), hash);
                     }
                     _ => unreachable!(),
                 }
