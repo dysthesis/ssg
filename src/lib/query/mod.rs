@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, hash::Hash};
+use std::{borrow::Cow, collections::HashMap, hash::Hash, pin::Pin};
 
 use crate::store::{self, Store};
 
@@ -56,14 +56,21 @@ pub trait Query: 'static + Hash {
     /// Note that this method is not responsible for caching. It will just
     /// eagerly run the build again, and therefore should not be called by
     /// anything other than [`crate::ctx::Ctx`]
-    fn query(&self, store: &Store) -> store::Id;
+    async fn query(&self, store: &Store) -> store::Id;
 }
 
 /// A dyn-compatible interface for [`Query`], containing basically the only
 /// functions it needs.
+///
+/// In particular, having those consts in [`Query`] makes it _not_ dyn 
+/// compatible, so this trait just erases that to make Rust happy.
 pub trait Erased {
     fn key(&self) -> Key;
-    fn query(&self, store: &Store) -> store::Id;
+
+    fn query<'a>(
+        &'a self,
+        store: &'a Store,
+    ) -> Pin<Box<dyn Future<Output = store::Id> + 'a>>;
 }
 
 impl<Q: Query> Erased for Q {
@@ -73,8 +80,11 @@ impl<Q: Query> Erased for Q {
     }
 
     #[inline]
-    fn query(&self, store: &Store) -> store::Id {
-        Query::query(self, store)
+    fn query<'a>(
+        &'a self,
+        store: &'a Store,
+    ) -> Pin<Box<dyn Future<Output = store::Id> + 'a>> {
+        Box::pin(Query::query(self, store))
     }
 }
 
@@ -117,6 +127,6 @@ impl Registry {
 
     /// Get the query associated with `id`
     pub fn get(&self, id: Id) -> Option<&dyn Erased> {
-        self.inner.get(id.0).map(|v| &**v)
+        self.inner.get(id.0).map(Box::as_ref)
     }
 }

@@ -13,7 +13,7 @@ impl Query for Read {
         vec![Cow::Borrowed(self.0.as_os_str().as_bytes())]
     }
 
-    fn query(&self, store: &crate::store::Store) -> store::Id {
+    async fn query(&self, store: &crate::store::Store) -> store::Id {
         let data = read(&self.0).unwrap_or_else(|err| panic!("failed to read {:?}: {err}", self.0));
         store.put(&data).expect("Failed to put data to store")
     }

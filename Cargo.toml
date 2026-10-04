@@ -31,8 +31,10 @@ strip = "symbols"
 blake3 = { version = "1.8.7", default-features = false, features = ["std"] }
 cap-std = { version = "4.0.3", default-features = false }
 color-eyre = { version = "0.6.5", default-features = false }
+crossbeam-channel = { version = "0.5.17", default-features = false, features = ["std"] }
 rusqlite = { version = "0.40.2", default-features = false }
 rustix = { version = "1.1.5", default-features = false, features = ["fs", "std"] }
+smallvec = "1.16.2"
 thiserror = { version = "2.0.21", default-features = false, features = [
   # Needed for errors to implement `std::error::Error`
   "std"

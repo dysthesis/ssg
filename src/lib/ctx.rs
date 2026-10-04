@@ -4,16 +4,17 @@ use std::{
 };
 
 use crate::{
-    db::{self, Db},
-    fs::Dir,
-    query::{Query, Registry},
-    store::{self, Store},
+    db::{self, Db}, fs::Dir, policy::crit_len::CritLen, query::{self, Query, Registry}, runtime::Runtime, scheduler::Scheduler, store::{self, Store},
 };
+
+pub const NUM_THREADS: usize = 8;
 
 pub struct Ctx {
     store: Store,
     db: Db,
     queries: Registry,
+    runtime: Runtime<NUM_THREADS>,
+    scheduler: Scheduler<CritLen>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -55,10 +56,23 @@ impl Ctx {
             error,
         })?;
         let queries = Registry::new();
-        Ok(Self { store, db, queries })
+        let runtime = Runtime::<NUM_THREADS>::init();
+        let scheduler = Scheduler::new();
+        Ok(Self {
+            store,
+            db,
+            queries,
+            scheduler,
+            runtime,
+        })
     }
     pub fn run<Q: Query>(&self, query: Q) {
         // TODO: actual execution, caching logic
+        // TODO: make it sync lmao
         query.query(&self.store);
+    }
+    /// Queries should call this instead
+    pub async fn query<Q: Query>(&self, from: query::Id, what: query:Id) -> store::Id {
+        todo!()
     }
 }
