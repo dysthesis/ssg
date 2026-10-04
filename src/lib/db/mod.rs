@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
 
-use crate::store;
+use crate::{query, store};
 
 /// A handle to an SQLite database that provides domain logic to put and get
 /// the previous build trace for a given query.
@@ -25,9 +25,14 @@ pub struct Dependency {
     expected: store::Id,
 }
 
+/// The trace of the most recent successful build for this query
 pub struct Trace {
-    query: String, // TODO: replace with a cannonical repr of queries
+    /// The identifier of the query in question
+    query: query::Key,
+    /// The output that this execution of the query produced.
     output: store::Id,
+    /// A list of dependencies that this query has been observed to require
+    /// during the last execution.
     dependencies: Vec<Dependency>,
 }
 
