@@ -2,6 +2,8 @@ use std::{borrow::Cow, collections::HashMap, hash::Hash};
 
 use crate::store::{self, Store};
 
+pub mod read;
+
 /// A persistent identifier for a query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Key([u8; 32]);

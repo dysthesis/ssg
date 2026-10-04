@@ -6,7 +6,7 @@ use std::{
 use crate::{
     db::{self, Db},
     fs::Dir,
-    query::Registry,
+    query::{Query, Registry},
     store::{self, Store},
 };
 
@@ -56,5 +56,9 @@ impl Ctx {
         })?;
         let queries = Registry::new();
         Ok(Self { store, db, queries })
+    }
+    pub fn run<Q: Query>(&self, query: Q) {
+        // TODO: actual execution, caching logic
+        query.query(&self.store);
     }
 }

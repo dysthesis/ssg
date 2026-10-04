@@ -10,10 +10,16 @@ pub enum Cli {
     /// Get the bytes stored in the object storage associated with the given
     /// hash
     Get(String),
+    /// Read a whole directory and store it in the Store
+    Read(String),
 }
 
-const COMMANDS: &[(&str, fn(String) -> Cli)] =
-    &[("init", Cli::Init), ("put", Cli::Put), ("get", Cli::Get)];
+const COMMANDS: &[(&str, fn(String) -> Cli)] = &[
+    ("init", Cli::Init),
+    ("put", Cli::Put),
+    ("get", Cli::Get),
+    ("read", Cli::Read),
+];
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {

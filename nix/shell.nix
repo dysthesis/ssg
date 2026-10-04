@@ -13,6 +13,12 @@
   in {
     devShells.default = craneLib.devShell {
       inherit (config) checks;
+      buildInputs = with pkgs; [
+        sqlite
+      ];
+      nativeBuildInputs = with pkgs; [
+        pkg-config
+      ];
       packages = with pkgs; [
         # Rust
         cargo-mutants
@@ -44,6 +50,9 @@
         printf '\n'
       '';
       RUST_GDB = lib.getExe gdb16;
+
+      SQLITE3_LIB_DIR = "${pkgs.lib.getLib pkgs.sqlite}/lib";
+      SQLITE3_INCLUDE_DIR = "${pkgs.lib.getDev pkgs.sqlite}/include";
     };
   };
 }

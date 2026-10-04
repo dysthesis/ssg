@@ -1,12 +1,21 @@
-use std::env;
+use std::{
+    env::{self, current_dir},
+    path::PathBuf,
+};
 
 use color_eyre::eyre;
 use ssg::{
+    ctx::Ctx,
     fs::Dir,
+    query::read::Read,
     store::{Id, Store},
 };
+use walkdir::WalkDir;
 
 use crate::cli::Cli;
+
+const STORE_PATH: &'static str = "store/";
+const DB_PATH: &'static str = "ssg.db";
 
 mod cli;
 fn main() -> eyre::Result<()> {
@@ -30,6 +39,20 @@ fn main() -> eyre::Result<()> {
             let bytes = store.get(key)?;
             println!("Obtained bytes: {bytes:?}")
         }
-    };
+        Cli::Read(dir) => {
+            let ctx = Ctx::new(&current_dir()?.join(STORE_PATH), &PathBuf::from(DB_PATH))?;
+            for file in WalkDir::new(dir)
+                .into_iter()
+                .filter_map(|entry| match entry {
+                    Ok(entry) if entry.file_type().is_file() => Some(entry.into_path()),
+                    Ok(_) => None,
+                    Err(err) => None,
+                })
+            {
+                let query = Read::new(file);
+                ctx.run(query);
+            }
+        }
+    }
     Ok(())
 }

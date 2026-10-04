@@ -37,6 +37,7 @@ thiserror = { version = "2.0.21", default-features = false, features = [
   # Needed for errors to implement `std::error::Error`
   "std"
 ]}
+walkdir = { version = "2.5.0", default-features = false }
 
 [dev-dependencies]
 proptest = "1.11.0"

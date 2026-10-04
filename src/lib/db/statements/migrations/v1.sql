@@ -1,7 +1,5 @@
 PRAGMA foreign_keys = ON;
 
-BEGIN;
-
 CREATE TABLE node (
     id INTEGER PRIMARY KEY,
     kind TEXT NOT NULL,
@@ -32,5 +30,4 @@ CREATE TABLE dependency (
     CHECK (parent <> dep)
 ) STRICT, WITHOUT ROWID;
 
-PRAGMA user_version = 2;
-COMMIT;
+PRAGMA user_version = 1;
