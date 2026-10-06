@@ -40,17 +40,18 @@ fn main() -> eyre::Result<()> {
             println!("Obtained bytes: {bytes:?}")
         }
         Cli::Read(dir) => {
-            let ctx = Ctx::new(&current_dir()?.join(STORE_PATH), &PathBuf::from(DB_PATH))?;
+            let mut ctx = Ctx::new(&current_dir()?.join(STORE_PATH), &PathBuf::from(DB_PATH))?;
             for file in WalkDir::new(dir)
                 .into_iter()
                 .filter_map(|entry| match entry {
                     Ok(entry) if entry.file_type().is_file() => Some(entry.into_path()),
                     Ok(_) => None,
-                    Err(err) => None,
+                    Err(_err) => None,
                 })
             {
                 let query = Read::new(file);
-                ctx.run(query);
+                let id = ctx.register_query(query);
+                ctx.run(id);
             }
         }
     }

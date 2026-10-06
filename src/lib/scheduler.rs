@@ -5,9 +5,16 @@ use crate::{ctx::Ctx, graph::Graph, policy::Policy, query, store};
 /// A unit of work for [`Scheduler`]
 pub struct Task {
     /// A reference to the [`query::Query`] which produced this work.
-    query: query::Id,
+    pub query: query::Id,
     /// The [`Future`] that corresponds with this [`query::Query`]
-    fut: Pin<Box<dyn Future<Output = store::Id> + Send>>,
+    pub fut: Pin<Box<dyn Future<Output = store::Id> + Send>>,
+}
+
+impl Task {
+    pub fn new(query: query::Id, ctx: &Ctx) -> Self {
+        // let query = ctx.
+        todo!()
+    }
 }
 
 /// Bookkeeping to keep track of which tasks can be run next.
@@ -33,27 +40,27 @@ impl<P: Policy> Scheduler<P> {
     }
     /// Submit a task to schedule. This is usually interfaced to by [`Ctx`]
     /// whenever someone requests a query, or by [`Runtime`]
-    fn submit(&self, task: Task) {
+    pub(crate) fn submit(&self, task: Task) {
         todo!()
     }
 
     /// Block until a runnable task exists.
-    fn next(&self) -> Task {
+    pub(crate) fn next(&self) -> Option<Task> {
         todo!()
     }
 
     /// The worker polled this task and got Pending.
-    fn park(&self, task: Task) {
+    pub(crate) fn park(&self, task: Task) {
         todo!()
     }
 
     /// Something awaited by this task became ready, so move it to [`Self::ready`]
-    fn wake(&self, id: &query::Id) {
+    pub(crate) fn wake(&self, id: &query::Id) {
         todo!()
     }
 
     /// The task has been completed
-    fn complete(&self, task: Task, output: store::Id) {
+    pub(crate) fn complete(&self, task: Task, output: store::Id) {
         // Wake all of the dependent tasks
         for task in self.graph.dependents_of(task.query) {
             self.wake(task);

@@ -1,10 +1,9 @@
 use std::{
-    io,
-    path::{Path, PathBuf},
+    io, path::{Path, PathBuf}, task::Poll,
 };
 
 use crate::{
-    db::{self, Db}, fs::Dir, policy::crit_len::CritLen, query::{self, Query, Registry}, runtime::Runtime, scheduler::Scheduler, store::{self, Store},
+    db::{self, Db}, fs::Dir, graph::Graph, policy::crit_len::CritLen, query::{self, Erased, Query, Registry}, runtime::{Event, Runtime}, scheduler::{Scheduler, Task}, store::{self, Store},
 };
 
 pub const NUM_THREADS: usize = 8;
@@ -42,6 +41,7 @@ pub enum Error {
 type Result<T> = std::result::Result<T, Error>;
 
 impl Ctx {
+    
     pub fn new(store_path: &Path, db_path: &Path) -> Result<Self> {
         let dir = Dir::new(store_path).map_err(|error| Error::DirOpenError {
             path: store_path.to_path_buf(),
@@ -66,13 +66,72 @@ impl Ctx {
             runtime,
         })
     }
-    pub fn run<Q: Query>(&self, query: Q) {
-        // TODO: actual execution, caching logic
-        // TODO: make it sync lmao
-        query.query(&self.store);
+    /// Register a query to the [`Self::queries`] registry if it does not exist.
+    /// In either case, returns the corresponding [`query::Id`].
+    pub fn register_query<Q: Query>(&self, query: Q) -> query::Id {
+        todo!()
     }
+
+    /// Get the query associated with the given id.
+    #[inline]
+    pub fn get_query(&self, id: query::Id) -> Option<&dyn Erased> {
+        self.queries.get(id)
+    }
+    
+pub fn run(&mut self, root: query::Id) -> store::Id {
+    // The root has no dependency preventing it from running.
+    let task = Task::new(root, &self);
+    self.scheduler.submit(task);
+
+    loop {
+        // Give every currently runnable task to the worker pool.
+        while let Some(task) = self.scheduler.next() {
+            self.runtime.submit(task);
+        }
+
+        // Nothing else is immediately runnable.
+        // Sleep until a worker or waker gives us new information.
+        match self.runtime.recv() {
+            Event::Polled(task, Poll::Ready(output)) => {
+                let id = task.query;
+
+                self.scheduler.complete(task, output);
+
+                if id == root {
+                    return output;
+                }
+            }
+
+            Event::Polled(task, Poll::Pending) => {
+                self.scheduler.park(task);
+            }
+
+            Event::Wake(id) => {
+                self.scheduler.wake(&id);
+            }
+        }
+    }
+}
     /// Queries should call this instead
-    pub async fn query<Q: Query>(&self, from: query::Id, what: query:Id) -> store::Id {
+    pub async fn query(&self, from: query::Id, what: query::Id) -> store::Id {
+        // TODO: Register this as a task in the scheduler and wait to be woken 
+        // up upon completion
+        self.result_for(what)
+    }
+
+    /// Checks the most recent result for some [`query::Query`] that is recorded
+    /// in [`Self::db`] and returns the corresponding [`store::Id`].
+    pub fn result_for(&self, query: query::Id) -> store::Id {
+        todo!()
+    }
+
+    /// Report a query as completed
+    pub fn complete(&self, query: query::Id) {
+        todo!()
+    }
+
+    /// Unblock a query when its dependency is ready
+    pub(crate) fn unblock(&self, query: query::Id) {
         todo!()
     }
 }

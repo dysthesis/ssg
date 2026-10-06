@@ -40,13 +40,6 @@ thread is free, distributing it to the workers. When a worker is done with a
 
 it returns the results back to `Ctx`.
 
-**Note.** `Ctx` handles results from `Runtime` instead of `Scheduler` because
-it holds `Graph`, not `Scheduler`. That is,
-
-- if the `Runtime` receives a blocked `Task`, it needs to call `Ctx::query`, and
-- if it receives a completed `Task`, it needs to call `Ctx::complete`, which
-  needs to query `Ctx::graph` for that `Task`'s dependents and wake them up.
-
 **Note.** We assume that `Query::query()` returns `Poll::Pending` only when
 it calls `Ctx::query`.
 
