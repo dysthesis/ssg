@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    ctx::Ctx,
+    ctx::Global,
     graph::Graph,
     policy::Policy,
     query,
@@ -60,7 +60,7 @@ impl Eq for Task {}
 impl Task {
     /// Create a new instance with no set priority yet. Priority will be set by
     /// the [`Scheduler`].
-    pub fn new(query: query::Id, ctx: &Ctx, priority: usize) -> Self {
+    pub fn new(query: query::Id, ctx: &Global, priority: usize) -> Self {
         let actual = ctx.get_query(query).unwrap();
         let fut = actual.query(ctx.store());
 
@@ -93,7 +93,7 @@ impl<P: Policy> Scheduler<P> {
     /// Submit a task to schedule. This is usually interfaced to by [`Ctx`]
     /// whenever someone requests a query, or by [`crate::runtime::Runtime`].
     /// This method assumes that the submitted task is not blocked by anything.
-    pub(crate) fn score(&self, query: query::Id, ctx: &Ctx) -> usize {
+    pub(crate) fn score(&self, query: query::Id, ctx: &Global) -> usize {
         P::score(query, ctx)
     }
 

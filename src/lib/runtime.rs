@@ -1,10 +1,10 @@
 use std::{
-    sync::{Arc, mpsc},
+    sync::{mpsc, Arc},
     task::{Context, Poll, Wake, Waker},
     thread::{self, JoinHandle, Thread},
 };
 
-use crate::{ctx::Ctx, query, scheduler::Task, store};
+use crate::{ctx::Global, query, scheduler::Task, store};
 
 /// A "dumb" handle to a bunch of worker threads that distributes work to them
 /// and reports back results

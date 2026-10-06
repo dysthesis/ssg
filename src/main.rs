@@ -5,7 +5,7 @@ use std::{
 
 use color_eyre::eyre;
 use ssg::{
-    ctx::Ctx,
+    ctx::Global,
     fs::Dir,
     query::read::Read,
     store::{Id, Store},
@@ -40,7 +40,7 @@ fn main() -> eyre::Result<()> {
             println!("Obtained bytes: {bytes:?}")
         }
         Cli::Read(dir) => {
-            let mut ctx = Ctx::new(&current_dir()?.join(STORE_PATH), &PathBuf::from(DB_PATH))?;
+            let mut ctx = Global::new(&current_dir()?.join(STORE_PATH), &PathBuf::from(DB_PATH))?;
             for file in WalkDir::new(dir)
                 .into_iter()
                 .filter_map(|entry| match entry {

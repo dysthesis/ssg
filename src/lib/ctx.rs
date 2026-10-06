@@ -1,8 +1,5 @@
 use std::{
-    io,
-    path::{Path, PathBuf},
-    sync::Arc,
-    task::Poll,
+    io, path::{Path, PathBuf}, sync::{Arc, mpsc}, task::Poll,
 };
 
 use crate::{
@@ -18,7 +15,13 @@ use crate::{
 
 pub const NUM_THREADS: usize = 8;
 
-pub struct Ctx {
+pub struct Current {
+    query: query::Id,
+    store: Arc<Store>,
+    event_tx: mpsc::Sender<Event>,
+}
+
+pub struct Global {
     store: Arc<Store>,
     db: Db,
     queries: Registry,
@@ -50,7 +53,7 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-impl Ctx {
+impl Global {
     pub fn new(store_path: &Path, db_path: &Path) -> Result<Self> {
         let dir = Dir::new(store_path).map_err(|error| Error::DirOpenError {
             path: store_path.to_path_buf(),

@@ -1,8 +1,8 @@
-use crate::{ctx::Ctx, policy::Policy, query};
+use crate::{ctx::Global, policy::Policy, query};
 
 pub struct CritLen {}
 impl Policy for CritLen {
-    fn score(query: query::Id, ctx: &Ctx) -> usize {
+    fn score(query: query::Id, ctx: &Global) -> usize {
         todo!()
     }
 }
