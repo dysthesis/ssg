@@ -1,6 +1,9 @@
-use std::{borrow::Cow, fs::read, os::unix::ffi::OsStrExt, path::PathBuf};
+use std::{borrow::Cow, fs::read, os::unix::ffi::OsStrExt, path::PathBuf, sync::Arc};
 
-use crate::{query::Query, store};
+use crate::{
+    query::Query,
+    store::{self, Store},
+};
 
 #[derive(Hash)]
 pub struct Read(PathBuf);
@@ -13,7 +16,7 @@ impl Query for Read {
         vec![Cow::Borrowed(self.0.as_os_str().as_bytes())]
     }
 
-    async fn query(&self, store: &crate::store::Store) -> store::Id {
+    async fn query(&self, store: &Store) -> store::Id {
         let data = read(&self.0).unwrap_or_else(|err| panic!("failed to read {:?}: {err}", self.0));
         store.put(&data).expect("Failed to put data to store")
     }

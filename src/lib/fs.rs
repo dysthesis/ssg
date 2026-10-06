@@ -372,9 +372,11 @@ mod tests {
                 std::fs::read(self.outside.join("sentinel"))?,
                 b"outside sentinel"
             );
-            assert!(std::fs::symlink_metadata(self.root.join("escape"))?
-                .file_type()
-                .is_symlink());
+            assert!(
+                std::fs::symlink_metadata(self.root.join("escape"))?
+                    .file_type()
+                    .is_symlink()
+            );
             assert_eq!(
                 std::fs::read_link(self.root.join("escape"))?,
                 self.link_target
@@ -919,18 +921,22 @@ mod tests {
     fn ancestor_symlink_escape_is_denied() -> color_eyre::Result<()> {
         for absolute_link in [false, true] {
             let sandbox = SymlinkSandbox::new(absolute_link)?;
-            assert!(sandbox
-                .dir
-                .create_dir_all(Path::new("escape/new/child"))
-                .is_err());
+            assert!(
+                sandbox
+                    .dir
+                    .create_dir_all(Path::new("escape/new/child"))
+                    .is_err()
+            );
             assert_absent(&sandbox.outside.join("new"));
             sandbox.assert_unchanged()?;
 
             let sandbox = SymlinkSandbox::new(absolute_link)?;
-            assert!(sandbox
-                .dir
-                .create_new(Path::new("escape/new_file"))
-                .is_err());
+            assert!(
+                sandbox
+                    .dir
+                    .create_new(Path::new("escape/new_file"))
+                    .is_err()
+            );
             assert_absent(&sandbox.outside.join("new_file"));
             sandbox.assert_unchanged()?;
 
@@ -950,35 +956,43 @@ mod tests {
             sandbox.assert_unchanged()?;
 
             let sandbox = SymlinkSandbox::new(absolute_link)?;
-            assert!(sandbox
-                .dir
-                .remove_file(Path::new("escape/sentinel"))
-                .is_err());
+            assert!(
+                sandbox
+                    .dir
+                    .remove_file(Path::new("escape/sentinel"))
+                    .is_err()
+            );
             sandbox.assert_unchanged()?;
 
             let sandbox = SymlinkSandbox::new(absolute_link)?;
-            assert!(sandbox
-                .dir
-                .rename(Path::new("escape/sentinel"), Path::new("destination"),)
-                .is_err());
+            assert!(
+                sandbox
+                    .dir
+                    .rename(Path::new("escape/sentinel"), Path::new("destination"),)
+                    .is_err()
+            );
             assert_absent(&sandbox.root.join("destination"));
             sandbox.assert_unchanged()?;
 
             let sandbox = SymlinkSandbox::new(absolute_link)?;
             std::fs::write(sandbox.root.join("source"), b"source bytes")?;
-            assert!(sandbox
-                .dir
-                .rename(Path::new("source"), Path::new("escape/sentinel"),)
-                .is_err());
+            assert!(
+                sandbox
+                    .dir
+                    .rename(Path::new("source"), Path::new("escape/sentinel"),)
+                    .is_err()
+            );
             assert_eq!(std::fs::read(sandbox.root.join("source"))?, b"source bytes");
             sandbox.assert_unchanged()?;
 
             let sandbox = SymlinkSandbox::new(absolute_link)?;
             std::fs::write(sandbox.root.join("source"), b"source bytes")?;
-            assert!(sandbox
-                .dir
-                .rename(Path::new("source"), Path::new("escape/new_file"),)
-                .is_err());
+            assert!(
+                sandbox
+                    .dir
+                    .rename(Path::new("source"), Path::new("escape/new_file"),)
+                    .is_err()
+            );
             assert_eq!(std::fs::read(sandbox.root.join("source"))?, b"source bytes");
             assert_absent(&sandbox.outside.join("new_file"));
             sandbox.assert_unchanged()?;
@@ -1042,9 +1056,11 @@ mod tests {
             std::fs::read(root.join("inside/sentinel"))?,
             b"inside sentinel"
         );
-        assert!(std::fs::symlink_metadata(root.join("link"))?
-            .file_type()
-            .is_symlink());
+        assert!(
+            std::fs::symlink_metadata(root.join("link"))?
+                .file_type()
+                .is_symlink()
+        );
         assert_eq!(std::fs::read_link(root.join("link"))?, Path::new("inside"));
 
         let mut root_names = std::fs::read_dir(&root)?
@@ -1093,9 +1109,11 @@ mod tests {
         }
         assert!(dir.create_new(Path::new("link")).is_err());
         assert!(dir.metadata(Path::new("link"))? == Kind::Other);
-        assert!(std::fs::symlink_metadata(root.join("link"))?
-            .file_type()
-            .is_symlink());
+        assert!(
+            std::fs::symlink_metadata(root.join("link"))?
+                .file_type()
+                .is_symlink()
+        );
         assert_eq!(std::fs::read_link(root.join("link"))?, target);
         assert_eq!(
             std::fs::read(outside.join("sentinel"))?,
@@ -1104,9 +1122,11 @@ mod tests {
 
         dir.rename(Path::new("link"), Path::new("moved_link"))?;
         assert_absent(&root.join("link"));
-        assert!(std::fs::symlink_metadata(root.join("moved_link"))?
-            .file_type()
-            .is_symlink());
+        assert!(
+            std::fs::symlink_metadata(root.join("moved_link"))?
+                .file_type()
+                .is_symlink()
+        );
         assert_eq!(std::fs::read_link(root.join("moved_link"))?, target);
         assert_eq!(
             std::fs::read(outside.join("sentinel"))?,
@@ -1124,9 +1144,11 @@ mod tests {
         std::fs::write(root.join("source"), b"replacement bytes")?;
         dir.rename(Path::new("source"), Path::new("link"))?;
         assert_absent(&root.join("source"));
-        assert!(std::fs::symlink_metadata(root.join("link"))?
-            .file_type()
-            .is_file());
+        assert!(
+            std::fs::symlink_metadata(root.join("link"))?
+                .file_type()
+                .is_file()
+        );
         assert_eq!(std::fs::read(root.join("link"))?, b"replacement bytes");
         assert_eq!(
             std::fs::read(outside.join("sentinel"))?,
@@ -1445,23 +1467,26 @@ mod tests {
             std::fs::write(root.join("candidate"), b"candidate")?;
 
             for source in ["candidate/", "candidate/."] {
-                assert!(dir
-                    .commit(Path::new(source), Path::new("published"))
-                    .is_err());
+                assert!(
+                    dir.commit(Path::new(source), Path::new("published"))
+                        .is_err()
+                );
                 assert_eq!(std::fs::read(root.join("candidate"))?, b"candidate");
                 assert_absent(&root.join("published"));
             }
-            assert!(dir
-                .commit(Path::new("candidate"), Path::new("published/."))
-                .is_err());
+            assert!(
+                dir.commit(Path::new("candidate"), Path::new("published/."))
+                    .is_err()
+            );
             assert_eq!(std::fs::read(root.join("candidate"))?, b"candidate");
             assert_absent(&root.join("published"));
 
             std::fs::create_dir(root.join("directory"))?;
             symlink("directory", root.join("link"))?;
-            assert!(dir
-                .commit(Path::new("link/."), Path::new("published"))
-                .is_err());
+            assert!(
+                dir.commit(Path::new("link/."), Path::new("published"))
+                    .is_err()
+            );
             assert_eq!(
                 std::fs::read_link(root.join("link"))?,
                 Path::new("directory")
@@ -1551,19 +1576,25 @@ mod tests {
             for absolute_link in [false, true] {
                 let sandbox = SymlinkSandbox::new(absolute_link)?;
                 std::fs::write(sandbox.root.join("candidate"), b"protected")?;
-                assert!(sandbox
-                    .dir
-                    .commit(Path::new("escape/sentinel"), Path::new("published"))
-                    .is_err());
+                assert!(
+                    sandbox
+                        .dir
+                        .commit(Path::new("escape/sentinel"), Path::new("published"))
+                        .is_err()
+                );
                 assert_absent(&sandbox.root.join("published"));
-                assert!(sandbox
-                    .dir
-                    .commit(Path::new("candidate"), Path::new("escape/sentinel"))
-                    .is_err());
-                assert!(sandbox
-                    .dir
-                    .commit(Path::new("candidate"), Path::new("escape/new"))
-                    .is_err());
+                assert!(
+                    sandbox
+                        .dir
+                        .commit(Path::new("candidate"), Path::new("escape/sentinel"))
+                        .is_err()
+                );
+                assert!(
+                    sandbox
+                        .dir
+                        .commit(Path::new("candidate"), Path::new("escape/new"))
+                        .is_err()
+                );
                 assert_absent(&sandbox.outside.join("new"));
                 assert_eq!(std::fs::read(sandbox.root.join("candidate"))?, b"protected");
                 sandbox.assert_unchanged()?;

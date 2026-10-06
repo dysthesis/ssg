@@ -1,15 +1,25 @@
 use std::{
-    io, path::{Path, PathBuf}, task::Poll,
+    io,
+    path::{Path, PathBuf},
+    sync::Arc,
+    task::Poll,
 };
 
 use crate::{
-    db::{self, Db}, fs::Dir, graph::Graph, policy::crit_len::CritLen, query::{self, Erased, Query, Registry}, runtime::{Event, Runtime}, scheduler::{Scheduler, Task}, store::{self, Store},
+    db::{self, Db},
+    fs::Dir,
+    graph::Graph,
+    policy::crit_len::CritLen,
+    query::{self, Erased, Query, Registry},
+    runtime::{Event, Runtime},
+    scheduler::{Scheduler, Task},
+    store::{self, Store},
 };
 
 pub const NUM_THREADS: usize = 8;
 
 pub struct Ctx {
-    store: Store,
+    store: Arc<Store>,
     db: Db,
     queries: Registry,
     runtime: Runtime<NUM_THREADS>,
@@ -41,16 +51,15 @@ pub enum Error {
 type Result<T> = std::result::Result<T, Error>;
 
 impl Ctx {
-    
     pub fn new(store_path: &Path, db_path: &Path) -> Result<Self> {
         let dir = Dir::new(store_path).map_err(|error| Error::DirOpenError {
             path: store_path.to_path_buf(),
             error,
         })?;
-        let store = Store::init(dir).map_err(|error| Error::StoreInitError {
+        let store = Arc::new(Store::init(dir).map_err(|error| Error::StoreInitError {
             path: store_path.to_path_buf(),
             error,
-        })?;
+        })?);
         let db = Db::init(db_path).map_err(|error| Error::DbInitError {
             path: db_path.to_path_buf(),
             error,
@@ -74,47 +83,49 @@ impl Ctx {
 
     /// Get the query associated with the given id.
     #[inline]
-    pub fn get_query(&self, id: query::Id) -> Option<&dyn Erased> {
+    pub fn get_query(&self, id: query::Id) -> Option<Arc<dyn Erased>> {
         self.queries.get(id)
     }
-    
-pub fn run(&mut self, root: query::Id) -> store::Id {
-    // The root has no dependency preventing it from running.
-    let task = Task::new(root, &self);
-    self.scheduler.submit(task);
 
-    loop {
-        // Give every currently runnable task to the worker pool.
-        while let Some(task) = self.scheduler.next() {
-            self.runtime.submit(task);
-        }
+    pub fn run(&mut self, root: query::Id) -> store::Id {
+        // The root has no dependency preventing it from running.
+        let score = self.scheduler.score(root, self);
+        let task = Task::new(root, self, score);
+        self.scheduler.submit(task);
 
-        // Nothing else is immediately runnable.
-        // Sleep until a worker or waker gives us new information.
-        match self.runtime.recv() {
-            Event::Polled(task, Poll::Ready(output)) => {
-                let id = task.query;
+        loop {
+            // Give every currently runnable task to the worker pool.
+            while let Some(task) = self.scheduler.next() {
+                self.runtime.submit(task);
+            }
 
-                self.scheduler.complete(task, output);
+            // Nothing else is immediately runnable.
+            // Sleep until a worker or waker gives us new information.
+            match self.runtime.recv() {
+                Event::Polled(task, Poll::Ready(output)) => {
+                    let id = task.query;
 
-                if id == root {
-                    return output;
+                    self.scheduler.complete(task, output);
+
+                    if id == root {
+                        return output;
+                    }
                 }
-            }
 
-            Event::Polled(task, Poll::Pending) => {
-                self.scheduler.park(task);
-            }
+                Event::Polled(task, Poll::Pending) => {
+                    self.scheduler.park(task);
+                }
 
-            Event::Wake(id) => {
-                self.scheduler.wake(&id);
+                Event::Wake(id) => {
+                    self.scheduler.wake(&id);
+                }
             }
         }
     }
-}
+
     /// Queries should call this instead
     pub async fn query(&self, from: query::Id, what: query::Id) -> store::Id {
-        // TODO: Register this as a task in the scheduler and wait to be woken 
+        // TODO: Register this as a task in the scheduler and wait to be woken
         // up upon completion
         self.result_for(what)
     }
@@ -133,5 +144,10 @@ pub fn run(&mut self, root: query::Id) -> store::Id {
     /// Unblock a query when its dependency is ready
     pub(crate) fn unblock(&self, query: query::Id) {
         todo!()
+    }
+
+    #[inline]
+    pub(crate) fn store(&self) -> Arc<Store> {
+        Arc::clone(&self.store)
     }
 }

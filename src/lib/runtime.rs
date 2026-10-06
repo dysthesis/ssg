@@ -1,5 +1,5 @@
 use std::{
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     task::{Context, Poll, Wake, Waker},
     thread::{self, JoinHandle, Thread},
 };

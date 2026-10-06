@@ -1,4 +1,4 @@
-use std::{borrow::Cow, collections::HashMap, hash::Hash, pin::Pin};
+use std::{borrow::Cow, collections::HashMap, hash::Hash, pin::Pin, sync::Arc};
 
 use crate::store::{self, Store};
 
@@ -26,7 +26,7 @@ impl From<Id> for usize {
 const HASH_DOMAIN: &[u8] = b"ssg/query\0";
 
 // is 'static unavoidable?
-pub trait Query: 'static + Hash {
+pub trait Query: 'static + Hash + Send + Sync {
     // We need some way to have persistent identity for these queries in order
     // to keep track of traces
 
@@ -35,7 +35,7 @@ pub trait Query: 'static + Hash {
 
     /// Return a byte-representation of the query parameters
     fn params(&self) -> Vec<Cow<'_, [u8]>>; // Cow is used for mixing borrowed
-                                            // and owned values
+    // and owned values
 
     fn key(&self) -> Key {
         let mut h = blake3::Hasher::new();
@@ -56,35 +56,35 @@ pub trait Query: 'static + Hash {
     /// Note that this method is not responsible for caching. It will just
     /// eagerly run the build again, and therefore should not be called by
     /// anything other than [`crate::ctx::Ctx`]
-    async fn query(&self, store: &Store) -> store::Id;
+    fn query(&self, store: &Store) -> impl Future<Output = store::Id> + Send;
 }
 
 /// A dyn-compatible interface for [`Query`], containing basically the only
 /// functions it needs.
 ///
-/// In particular, having those consts in [`Query`] makes it _not_ dyn 
+/// In particular, having those consts in [`Query`] makes it _not_ dyn
 /// compatible, so this trait just erases that to make Rust happy.
-pub trait Erased {
+pub trait Erased: Send + Sync {
     fn key(&self) -> Key;
 
-    fn query<'a>(
-        &'a self,
-        store: &'a Store,
-    ) -> Pin<Box<dyn Future<Output = store::Id> + 'a>>;
+    fn query(
+        self: Arc<Self>,
+        store: Arc<Store>,
+    ) -> Pin<Box<dyn Future<Output = store::Id> + Send + 'static>>;
 }
 
 impl<Q: Query> Erased for Q {
     #[inline]
     fn key(&self) -> Key {
-        Query::key(self)
+        Q::key(self)
     }
 
     #[inline]
-    fn query<'a>(
-        &'a self,
-        store: &'a Store,
-    ) -> Pin<Box<dyn Future<Output = store::Id> + 'a>> {
-        Box::pin(Query::query(self, store))
+    fn query(
+        self: Arc<Self>,
+        store: Arc<Store>,
+    ) -> Pin<Box<dyn Future<Output = store::Id> + Send + 'static>> {
+        Box::pin(async move { Q::query(&*self, &store).await })
     }
 }
 
@@ -97,7 +97,7 @@ fn hash_bytes(h: &mut blake3::Hasher, bytes: &[u8]) {
 /// A list of all of the queries inspected durin this run.
 #[derive(Default)]
 pub struct Registry {
-    inner: Vec<Box<dyn Erased>>, // TODO: figure out a more efficient repr
+    inner: Vec<Arc<dyn Erased>>, // TODO: figure out a more efficient repr
     by_key: HashMap<Key, Id>,
 }
 
@@ -119,14 +119,14 @@ impl Registry {
 
         let id = Id(self.inner.len());
 
-        self.inner.push(Box::new(query));
+        self.inner.push(Arc::new(query));
         self.by_key.insert(key, id);
 
         id
     }
 
     /// Get the query associated with `id`
-    pub fn get(&self, id: Id) -> Option<&dyn Erased> {
-        self.inner.get(id.0).map(Box::as_ref)
+    pub fn get(&self, id: Id) -> Option<Arc<dyn Erased>> {
+        self.inner.get(id.0).cloned()
     }
 }
